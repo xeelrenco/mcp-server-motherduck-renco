@@ -5,6 +5,8 @@ These instructions are sent to the client during initialization
 to provide context about how to use the server's capabilities.
 """
 
+from .prompts import PROMPT_TEXTS
+
 INSTRUCTIONS_BASE = """Execute SQL queries against DuckDB and MotherDuck databases using DuckDB SQL syntax.
 
 ## Available Tools
@@ -184,4 +186,5 @@ def get_instructions(
         )
 
     context = "## Server Configuration\n\n" + "\n".join(context_lines) + "\n\n"
-    return context + INSTRUCTIONS_BASE
+    renco_context = PROMPT_TEXTS["renco-assistant-context"].strip()
+    return context + renco_context + "\n\n" + INSTRUCTIONS_BASE
