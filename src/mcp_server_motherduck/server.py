@@ -22,6 +22,7 @@ from .tools.list_tables import list_tables as list_tables_fn
 from .tools.switch_database_connection import (
     switch_database_connection as switch_database_connection_fn,
 )
+from .prompts import PROMPT_TEXTS
 
 logger = logging.getLogger("mcp_server_motherduck")
 
@@ -239,6 +240,15 @@ def create_mcp_server(
                 create_if_not_exists=create_if_not_exists,
             )
             return json.dumps(result, indent=2, default=str)
+
+    # --- Renco MCP Prompt (single: schema + instructions) ---
+    @mcp.prompt(
+        name="renco-assistant-context",
+        description="Full context: Renco MDR database schema, projects, rules and things to do",
+    )
+    def renco_assistant_context() -> str:
+        """Full context: Renco MDR database schema, projects, rules and things to do."""
+        return PROMPT_TEXTS["renco-assistant-context"]
 
     logger.info(f"FastMCP server created with {len(mcp._tool_manager._tools)} tools")
 
