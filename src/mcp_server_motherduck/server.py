@@ -116,6 +116,22 @@ def create_mcp_server(
         "openWorldHint": False,
     }
 
+    # Register get_instructions tool (exposes full context so clients can load it on demand)
+    @mcp.tool(
+        name="get_instructions",
+        title="Get instructions",
+        description="Return the full assistant context and instructions: Renco MDR schema, operating rules, database layout, join guidance, and DuckDB reference. Call this at the start of a task to load the context when the client did not inject it automatically.",
+        annotations=catalog_annotations,
+    )
+    def get_instructions_tool() -> str:
+        """
+        Return the full server instructions (schema, rules, things to do).
+
+        Returns:
+            Full instructions text including Renco context and DuckDB reference.
+        """
+        return instructions
+
     # Switch database annotations (open world - can connect to any database)
     switch_db_annotations = {
         "readOnlyHint": False,
