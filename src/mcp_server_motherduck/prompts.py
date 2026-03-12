@@ -44,6 +44,7 @@ OPERATING RULES
    - workflow status
    - reconciliation outcome
    - description-generation workflow status
+   - for DocumentTitleDescriptions, valid statuses are generated and manual_written; rejected indicates failure or invalid output.
 14. If a result set could be long, return a summary first and limit detailed listings unless the user explicitly asks for full output.
 15. Prefer evidence-based answers with computed numbers over generic explanations.
 
@@ -194,13 +195,12 @@ Schema: mdr_reconciliation
 - Do not treat candidate retrieval rank or similarity as final business truth
 
 8. DocumentTitleDescriptions
-- AI-generated descriptions for RACI titles
-- Use for generation / approval workflow analysis
+- Versioned descriptions for RACI titles: AI-generated (Status=generated) or manually written (Status=manual_written). Rejected rows (Status=rejected) exist but are not used as trusted input.
+- Use for description-origin and generation workflow analysis (e.g. counts by Status).
 
 9. v_DocumentTitleDescriptions_Final
-- Final effective description source
-- Manual override takes precedence over AI-generated text
-- Use this when the user asks about the final semantic description of a RACI document
+- Final effective description source. ManualDescription (when present) takes precedence over Description (AI-generated).
+- Use this when the user asks about the final semantic description of a RACI document.
 
 10. v_MdrReconciliationAgentInput
 - Prepared input for AI reconciliation agents
@@ -256,10 +256,10 @@ Use these as expected values, but verify from data if exact values matter.
 - MANUAL_REVIEW
 
 2. DocumentTitleDescriptions.Status
-Known examples from context:
-- generated
-- approved
-Do not assume this list is exhaustive without inspecting data.
+- generated: AI-generated description (valid for downstream use).
+- manual_written: hand-written or manually reviewed description (valid for downstream use).
+- rejected: generation failed or output invalid (not used as trusted input).
+Both generated and manual_written are valid; the value only distinguishes the source. Do not use deprecated values approved or reviewed.
 
 3. Workflow / execution statuses
 Likely values may include:
@@ -381,7 +381,8 @@ When asked about document semantics:
 
 When asked about description-generation workflow:
 - use DocumentTitleDescriptions
-- inspect Status values before giving a complete breakdown if needed
+- Status: generated (AI) | manual_written (hand) | rejected. Both generated and manual_written are valid; use both for “has description” or quality metrics unless the user asks specifically for AI-only or manual-only.
+- inspect Status distribution when giving a complete breakdown
 
 --------------------------------------------------
 6. Agent agreement analysis
