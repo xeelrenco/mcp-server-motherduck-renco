@@ -260,10 +260,10 @@ def create_mcp_server(
     # --- Renco MCP Prompt (single: schema + instructions) ---
     @mcp.prompt(
         name="renco-assistant-context",
-        description="Full context: Renco MDR database schema, projects, rules and things to do",
+        description="Full context for the Renco MDR historical dataset, RACI document catalog, reconciliation workflow, recovery layer, and consolidated business outcome",
     )
     def renco_assistant_context() -> str:
-        """Full context: Renco MDR database schema, projects, rules and things to do."""
+        """Full context for Renco MDR, RACI, reconciliation, recovery, and consolidated outcomes."""
         return PROMPT_TEXTS["renco-assistant-context"]
 
     logger.info(f"FastMCP server created with {len(mcp._tool_manager._tools)} tools")
