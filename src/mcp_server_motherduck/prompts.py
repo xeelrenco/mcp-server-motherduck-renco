@@ -191,6 +191,14 @@ TitleKey = lower(trim(Title))
 
 ---
 
+v_DocumentsEnriched
+
+Readable RACI document metadata view.
+
+Use when human-readable information is required.
+
+---
+
 Disciplines
 
 Codes include:
@@ -525,12 +533,6 @@ judge_3_3
 recovery_3_4
 
 ---
-
-14. v_DocumentsEnriched
-
-Readable RACI document metadata view.
-
-Use when human-readable information is required.
 
 ==================================================
 JOIN GUIDANCE
