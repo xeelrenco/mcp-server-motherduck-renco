@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pannello MDR – prova</title>
+<style>
+  :root { --bg:#ffffff; --text:#1d2330; --muted:#5d6677; --line:#e2e5eb; --accent:#1f5fae;
+          --ok:#1e7a46; --ok-bg:#e5f4ec; --err:#b3261e; --err-bg:#fbe9e7; --wait:#8a5a00; --wait-bg:#fdf3dc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c2027; --text:#e7eaf0; --muted:#9aa3b2; --line:#2c323c; --accent:#5b9bea;
+            --ok:#6fd39b; --ok-bg:#173325; --err:#ff8a80; --err-bg:#3a1b19; --wait:#f2c05c; --wait-bg:#3a2f14; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text);
+         font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  h1 { font-size:17px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 14px; font-size:13px; }
+  ol { list-style:none; padding:0; margin:0; }
+  li { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .name { font-weight:600; flex:1; min-width:180px; }
+  .st { font-size:12px; font-weight:600; padding:2px 9px; border-radius:999px; }
+  .st.ok { background:var(--ok-bg); color:var(--ok); }
+  .st.err { background:var(--err-bg); color:var(--err); }
+  .st.wait { background:var(--wait-bg); color:var(--wait); }
+  .det { color:var(--muted); font-size:12px; margin-top:4px; word-break:break-word; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px;
+           font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  button[disabled] { opacity:.5; cursor:default; }
+  input[type=file] { font-size:12px; }
+</style>
+</head>
+<body>
+<h1>Pannello MDR – prova di collegamento</h1>
+<p class="sub">Verifica cosa permette la chat a un pannello interattivo. Esegui i passi in ordine, poi premi "Riporta i risultati".</p>
+<ol>
+  <li id="t-conn"><div class="row"><span class="name">1. Collegamento con la chat</span><span class="st wait">in corso</span></div><div class="det"></div></li>
+  <li id="t-data"><div class="row"><span class="name">2. Dati ricevuti dal server</span><span class="st wait">in attesa</span></div><div class="det"></div></li>
+  <li id="t-call"><div class="row"><span class="name">3. Il pannello chiama il server</span><button id="b-call" disabled>Prova</button><span class="st wait">da provare</span></div><div class="det"></div></li>
+  <li id="t-file"><div class="row"><span class="name">4. Scelta di un PDF dal computer</span><input type="file" id="f" accept="application/pdf,.pdf"><span class="st wait">da provare</span></div><div class="det"></div></li>
+  <li id="t-net"><div class="row"><span class="name">5. Collegamento diretto a Cloud Storage</span><button id="b-net">Prova</button><span class="st wait">da provare</span></div><div class="det">Serve per caricare i PDF direttamente nel bucket, come fa il sito.</div></li>
+  <li id="t-link"><div class="row"><span class="name">6. Apertura del sito del generatore</span><button id="b-link" disabled>Prova</button><span class="st wait">da provare</span></div><div class="det"></div></li>
+  <li id="t-msg"><div class="row"><span class="name">7. Il pannello scrive in chat</span><button id="b-msg" disabled>Riporta i risultati</button><span class="st wait">da provare</span></div><div class="det"></div></li>
+</ol>
+
+<script>/*__MCP_APPS_SDK__*/</script>
+<script>
+(function () {
+  var results = {};
+  function set(id, state, label, detail) {
+    var li = document.getElementById(id), st = li.querySelector(".st");
+    st.className = "st " + state; st.textContent = label;
+    if (detail !== undefined) li.querySelector(".det").textContent = detail;
+    results[id] = label + (detail ? " – " + detail : "");
+  }
+  function textOf(res) {
+    if (!res) return "";
+    if (res.structuredContent) return JSON.stringify(res.structuredContent);
+    return (res.content || []).filter(function (c) { return c.type === "text"; }).map(function (c) { return c.text; }).join(" ");
+  }
+  function parse(res) {
+    if (res && res.structuredContent) return res.structuredContent;
+    try { return JSON.parse(textOf(res)); } catch (e) { return null; }
+  }
+
+  var sdk = window.__mcpApps;
+  if (!sdk || !sdk.App) { set("t-conn", "err", "non riuscito", "libreria MCP Apps non caricata"); return; }
+  var app = new sdk.App({ name: "Pannello MDR (prova)", version: "0.1.0" }, {});
+  var appUrl = "";
+
+  app.ontoolresult = function (p) {
+    var d = parse(p);
+    if (d) {
+      appUrl = d.app_url || "";
+      set("t-data", "ok", "ricevuti", "Ora del server: " + d.ora_server + (d.app_url ? " · sito: " + d.app_url : ""));
+      document.getElementById("b-link").disabled = !appUrl;
+      if (!appUrl) set("t-link", "wait", "non configurato", "Manca MDR_APP_URL sul server");
+    } else {
+      set("t-data", "err", "formato inatteso", textOf(p).slice(0, 200));
+    }
+  };
+
+  var timer = setTimeout(function () {
+    set("t-conn", "err", "nessuna risposta", "La chat non ha completato il collegamento entro 10 secondi");
+  }, 10000);
+
+  app.connect().then(function () {
+    clearTimeout(timer);
+    var host = app.getHostVersion() || {}, caps = app.getHostCapabilities() || {};
+    set("t-conn", "ok", "riuscito", "Chat: " + (host.name || "?") + " " + (host.version || "") +
+        " · funzioni dichiarate: " + (Object.keys(caps).join(", ") || "nessuna"));
+    ["b-call", "b-msg"].forEach(function (b) { document.getElementById(b).disabled = false; });
+    try { app.setupSizeChangedNotifications(); } catch (e) {}
+  }).catch(function (e) {
+    clearTimeout(timer);
+    set("t-conn", "err", "non riuscito", String(e && e.message || e));
+  });
+
+  document.getElementById("b-call").onclick = function () {
+    set("t-call", "wait", "in corso", "");
+    app.callServerTool({ name: "pannello_mdr_ping", arguments: {} }).then(function (res) {
+      var d = parse(res);
+      if (res.isError) set("t-call", "err", "rifiutata", textOf(res).slice(0, 200));
+      else set("t-call", "ok", "riuscita", d ? ("Righe MDR storiche: " + d.righe_mdr_storiche + " · ora server: " + d.ora_server) : textOf(res).slice(0, 200));
+    }).catch(function (e) { set("t-call", "err", "non riuscita", String(e && e.message || e)); });
+  };
+
+  document.getElementById("f").onchange = function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) { set("t-file", "err", "nessun file", ""); return; }
+    f.slice(0, 5).arrayBuffer().then(function (buf) {
+      var head = String.fromCharCode.apply(null, new Uint8Array(buf));
+      set("t-file", "ok", "riuscita", f.name + " · " + (f.size / 1048576).toFixed(1) + " MB · " + (head === "%PDF-" ? "PDF valido" : "non sembra un PDF"));
+    }).catch(function (e) { set("t-file", "err", "lettura non riuscita", String(e && e.message || e)); });
+  };
+
+  document.getElementById("b-net").onclick = function () {
+    set("t-net", "wait", "in corso", "");
+    // no-cors: basta che la richiesta parta; un errore qui vuol dire che la chat blocca il collegamento
+    fetch("https://storage.googleapis.com/", { method: "GET", mode: "no-cors", cache: "no-store" }).then(function () {
+      set("t-net", "ok", "permesso", "Il pannello può collegarsi a Cloud Storage");
+    }).catch(function (e) {
+      set("t-net", "err", "bloccato", String(e && e.message || e) + " – probabilmente la chat non permette collegamenti esterni dal pannello");
+    });
+  };
+
+  document.getElementById("b-link").onclick = function () {
+    app.openLink({ url: appUrl }).then(function (r) {
+      if (r && r.isError) set("t-link", "err", "rifiutata", "La chat ha rifiutato l'apertura del link");
+      else set("t-link", "ok", "riuscita", appUrl);
+    }).catch(function (e) { set("t-link", "err", "non riuscita", String(e && e.message || e)); });
+  };
+
+  document.getElementById("b-msg").onclick = function () {
+    var lines = Object.keys(results).map(function (k) {
+      return document.querySelector("#" + k + " .name").textContent + ": " + results[k];
+    });
+    app.sendMessage({ role: "user", content: [{ type: "text", text: "Risultati prova pannello MDR:\n" + lines.join("\n") }] })
+      .then(function (r) {
+        if (r && r.isError) set("t-msg", "err", "rifiutato", "La chat non accetta messaggi dal pannello");
+        else set("t-msg", "ok", "riuscito", "Messaggio inviato in chat");
+      }).catch(function (e) { set("t-msg", "err", "non riuscito", String(e && e.message || e)); });
+  };
+})();
+</script>
+</body>
+</html>
