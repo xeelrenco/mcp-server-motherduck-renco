@@ -22,6 +22,8 @@ import os
 import re
 import secrets
 import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -61,6 +63,7 @@ PROJECT_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,39}$")
 JOB_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[A-Za-z0-9_\-]{1,40}-[0-9a-f]{4}$")
 SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._\- ]+")
 MB = 1024 * 1024
+LINK_MINUTES = 15
 
 
 def generator_enabled() -> bool:
@@ -109,11 +112,12 @@ class GcsBackend:
         return sorted(b.name for b in self.client.list_blobs(self.bucket, prefix=prefix))
 
     def read_json(self, key: str) -> Optional[Dict]:
-        blob = self.bucket.blob(key)
-        if not blob.exists():
-            return None
+        from google.api_core.exceptions import NotFound
+
         try:
-            return json.loads(blob.download_as_text())
+            return json.loads(self.bucket.blob(key).download_as_text())
+        except NotFound:
+            return None
         except ValueError:
             return None
 
@@ -305,6 +309,18 @@ def _tz_offset_hours(d: dt.datetime) -> int:
     return 2 if last_sunday(3) <= d.astimezone(dt.timezone.utc) < last_sunday(10) else 1
 
 
+SUMMARY_LABELS = [("mdr_rows", "Righe MDR"), ("documents", "Documenti"), ("elapsed_minutes", "Durata (minuti)")]
+
+
+def _public_summary(summary: Any) -> Optional[Dict]:
+    """Del riepilogo del motore si mostrano solo alcuni dati, in italiano (niente costi)."""
+    if not isinstance(summary, dict):
+        return None
+    out = {label: summary[key] for key, label in SUMMARY_LABELS
+           if isinstance(summary.get(key), (int, float, str)) and summary.get(key) != ""}
+    return out or None
+
+
 def _fmt_date(value: Optional[str]) -> str:
     if not value:
         return "data del run"
@@ -329,6 +345,7 @@ def _age_hours(value: Optional[str]) -> float:
 class GeneratorService:
     def __init__(self, backend) -> None:
         self.b = backend
+        self._final: Dict[str, Dict] = {}
         self.max_parallel = int(_env_num("MDR_MAX_PARALLEL", 0))
         self.stale_hours = _env_num("MDR_STALE_HOURS", 4)
         self.max_file_mb = int(_env_num("MDR_MAX_FILE_MB", 32))
@@ -377,16 +394,29 @@ class GeneratorService:
             "sow_files": run.get("sow_files") or [],
             "has_mdr": bool(outputs.get("mdr")),
             "has_qa": bool(outputs.get("qa_report")),
-            "summary": run.get("summary"),
+            "summary": _public_summary(run.get("summary")),
         }
 
     def get(self, job_id: str) -> Dict:
         if not valid_job_id(job_id):
             raise ValueError("Generazione non trovata.")
-        run = self.b.read_json(status_key(job_id))
+        run = self._load(job_id)
         if not run:
             raise ValueError("Generazione non trovata.")
-        return self._refresh(run)
+        return run
+
+    def _load(self, job_id: str) -> Optional[Dict]:
+        """Stato di una generazione. Gli stati finali non cambiano più: si tengono in memoria."""
+        cached = self._final.get(job_id)
+        if cached is not None:
+            return dict(cached)
+        run = self.b.read_json(status_key(job_id))
+        if not run:
+            return None
+        run = self._refresh(run)
+        if run.get("state") not in ACTIVE_STATES:
+            self._final[job_id] = dict(run)
+        return run
 
     def list_runs(self, limit: int = 10, state: str = "", q: str = "") -> Tuple[List[Dict], bool]:
         ids = self.b.list_job_ids()
@@ -394,27 +424,26 @@ class GeneratorService:
         if q:  # il codice progetto è nell'id: si filtra senza leggere gli stati
             ids = [i for i in ids if q in "-".join(i.split("-")[2:-1]).lower()]
         out: List[Dict] = []
-        for job_id in ids:
-            run = self.b.read_json(status_key(job_id))
-            if not run:
-                continue
-            run = self._refresh(run)
-            if state == "active" and run.get("state") not in ACTIVE_STATES:
-                continue
-            if state and state != "active" and run.get("state") != state:
-                continue
-            out.append(self.view(run))
-            if len(out) > limit:
-                break
+        batch = max(limit + 1, 8)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for start in range(0, len(ids), batch):
+                runs = list(pool.map(self._load, ids[start:start + batch]))  # in parallelo, nell'ordine degli id
+                for run in runs:
+                    if not run:
+                        continue
+                    if state == "active" and run.get("state") not in ACTIVE_STATES:
+                        continue
+                    if state and state != "active" and run.get("state") != state:
+                        continue
+                    out.append(self.view(run))
+                if len(out) > limit:
+                    break
         return out[:limit], len(out) > limit
 
     def active_count(self) -> int:
-        count = 0
-        for job_id in self.b.list_job_ids()[:30]:
-            run = self.b.read_json(status_key(job_id))
-            if run and self._refresh(run).get("state") in ACTIVE_STATES:
-                count += 1
-        return count
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            runs = list(pool.map(self._load, self.b.list_job_ids()[:30]))
+        return sum(1 for run in runs if run and run.get("state") in ACTIVE_STATES)
 
     # -- nuova generazione -------------------------------------------------------
     def _check(self, project_code: str, start_date: str, files: List[Tuple[str, int]]) -> Optional[str]:
@@ -542,6 +571,26 @@ class GeneratorService:
         filename = filename or key.rsplit("/", 1)[-1]
         return {"url": self.b.signed_get_url(key, filename, ctype, disp), "nome": filename}
 
+    def links(self, job_id: str) -> Dict:
+        """Tutti i link di download in una volta: il pannello li scarica in anticipo."""
+        run = self.get(job_id)
+        outputs = run.get("outputs") or {}
+
+        def one(key: str, filename: Optional[str], ctype: str, disp: str) -> Dict:
+            name = filename or key.rsplit("/", 1)[-1]
+            return {"url": self.b.signed_get_url(key, name, ctype, disp, LINK_MINUTES), "nome": name}
+
+        out: Dict[str, Any] = {"scadenza_minuti": LINK_MINUTES, "sow": {}}
+        if outputs.get("mdr"):
+            out["mdr"] = one(outputs["mdr"], None, XLSX, "attachment")
+        if outputs.get("qa_report"):
+            out["qa"] = one(outputs["qa_report"], None, XLSX, "attachment")
+        if run.get("state") in ("succeeded", "failed", "cancelled"):
+            out["log"] = one(f"jobs/{job_id}/log.txt", f"log-{job_id}.txt", "text/plain", "attachment")
+        for name in run.get("sow_files") or []:
+            out["sow"][name] = one(f"jobs/{job_id}/input/{name}", name, "application/pdf", "inline")
+        return out
+
 
 # --------------------------------------------------------------------------
 # Registrazione nel server MCP
@@ -589,10 +638,13 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
     _inject_resource_meta(mcp)
 
     async def run(fn, *args):
+        started = time.monotonic()
         try:
             return await anyio.to_thread.run_sync(lambda: fn(*args))
         except ValueError as exc:
             raise ToolError(str(exc))
+        finally:
+            logger.info("generatore %s: %.1f s", getattr(fn, "__name__", "?"), time.monotonic() - started)
 
     @mcp.resource(GEN_URI, name="generatore_mdr", title="Generatore MDR",
                   description="Pannello per lanciare e seguire le generazioni MDR",
@@ -662,5 +714,10 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
               annotations=read_hints, meta=app_only)
     async def mdr_link(job_id: str, tipo: str, nome: str = "") -> dict:
         return await run(svc.link, job_id, tipo, nome)
+
+    @mcp.tool(name="mdr_links", title="Link di download", description="Usato solo dal pannello.",
+              annotations=read_hints, meta=app_only)
+    async def mdr_links(job_id: str) -> dict:
+        return await run(svc.links, job_id)
 
     logger.info("Generatore MDR registrato (%s)", GEN_URI)

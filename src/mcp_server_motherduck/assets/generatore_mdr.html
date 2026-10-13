@@ -22,6 +22,9 @@
   .drop { border:2px dashed var(--line); border-radius:8px; padding:14px; text-align:center; color:var(--muted); cursor:pointer; background:var(--soft); }
   .drop.over { border-color:var(--accent); }
   button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:7px 14px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  a.btn { display:inline-block; text-decoration:none; background:var(--accent); color:#fff; border-radius:6px; padding:7px 14px; font-size:13px; font-weight:600; }
+  a.btn.sec { background:var(--soft); color:var(--text); border:1px solid var(--line); }
+  a.btn.off { opacity:.5; pointer-events:none; }
   button.sec { background:var(--soft); color:var(--text); border:1px solid var(--line); }
   button.danger { background:var(--err-bg); color:var(--err); border:1px solid var(--err); }
   button[disabled] { opacity:.5; cursor:default; }
@@ -280,12 +283,44 @@ window.__mcpApps={App:OO};})();</script>
 
   // ---- dettaglio
   function dl(label, value) { var f = document.createDocumentFragment(); f.appendChild(el("dt", "", label)); f.appendChild(el("dd", "", value)); f.lastChild.style.margin = 0; return f; }
-  function download(kind, name) {
-    call("mdr_link", { job_id: curJob, tipo: kind, nome: name || "" }).then(function (l) {
-      return app.openLink({ url: l.url });
-    }).then(function (r) {
-      if (r && r.isError) say($("detmsg"), "La chat non ha aperto il link. Riprova.", "err");
-    }).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); });
+  var links = null, linksAt = 0, linksJob = null;
+  function fetchLinks(job) {
+    return call("mdr_links", { job_id: job }).then(function (l) { if (job === curJob) { links = l; linksAt = Date.now(); } return l; });
+  }
+  function linkFor(kind, name) { return links ? (kind === "sow" ? links.sow && links.sow[name] : links[kind]) : null; }
+  // Il link è già pronto: il clic apre subito il file, senza attese (il browser blocca le aperture ritardate).
+  function makeLink(label, kind, name, cls) {
+    var a = el("a", "btn " + (cls || "") + " off", label); a.target = "_blank"; a.rel = "noopener";
+    a.dataset.kind = kind; a.dataset.name = name || "";
+    a.onclick = function (e) {
+      var l = linkFor(kind, name);
+      if (!l) { e.preventDefault(); return; }
+      if (Date.now() - linksAt > 9 * 60 * 1000) { // link quasi scaduto: si rinnova e si riprova al clic successivo
+        e.preventDefault(); a.classList.add("off"); fetchLinks(curJob).then(function () { a.classList.remove("off"); a.href = linkFor(kind, name).url; say($("detmsg"), "Link rinnovato: premi di nuovo.", "ok"); });
+        return;
+      }
+      e.preventDefault();
+      app.openLink({ url: l.url }).then(function (r) {
+        if (r && r.isError) throw new Error("rifiutato");
+      }).catch(function () {
+        var w = null; try { w = window.open(l.url, "_blank", "noopener"); } catch (x) {}
+        if (!w) showUrl(l);
+      });
+    };
+    return a;
+  }
+  function showUrl(l) {
+    var box = $("detmsg"); box.textContent = "";
+    var m = el("div", "msg", "La chat non ha aperto il file. Copia questo indirizzo e incollalo in una nuova scheda: ");
+    var inp = el("input"); inp.type = "text"; inp.readOnly = true; inp.value = l.url; inp.style.cssText = "width:100%;max-width:100%;margin-top:6px";
+    inp.onfocus = function () { inp.select(); };
+    m.appendChild(inp); box.appendChild(m);
+  }
+  function armLinks() {
+    document.querySelectorAll("#det a.btn").forEach(function (a) {
+      var l = linkFor(a.dataset.kind, a.dataset.name);
+      if (l) { a.href = l.url; a.classList.remove("off"); }
+    });
   }
   function drawDet(r) {
     var box = $("det"); box.textContent = "";
@@ -305,10 +340,10 @@ window.__mcpApps={App:OO};})();</script>
     box.appendChild(d);
     if (r.error) box.appendChild(el("div", "msg err", r.error));
     var a = el("div", "actions");
-    if (r.has_mdr) { var b1 = el("button", "", "Scarica MDR"); b1.onclick = function () { download("mdr"); }; a.appendChild(b1); }
-    if (r.has_qa) { var b2 = el("button", "sec", "Report qualità"); b2.onclick = function () { download("qa"); }; a.appendChild(b2); }
-    var b3 = el("button", "sec", "Log"); b3.onclick = function () { download("log"); }; a.appendChild(b3);
-    r.sow_files.forEach(function (n) { var b = el("button", "sec", "SoW: " + n); b.onclick = function () { download("sow", n); }; a.appendChild(b); });
+    if (r.has_mdr) a.appendChild(makeLink("Scarica MDR", "mdr", "", ""));
+    if (r.has_qa) a.appendChild(makeLink("Scarica report qualità", "qa", "", "sec"));
+    if (!r.active) a.appendChild(makeLink("Log", "log", "", "sec"));
+    r.sow_files.forEach(function (n) { a.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
     if (r.active) {
       var bc = el("button", "danger", "Annulla"); bc.onclick = function () {
         bc.disabled = true;
@@ -317,6 +352,9 @@ window.__mcpApps={App:OO};})();</script>
     }
     box.appendChild(a);
     var m = el("div"); m.id = "detmsg"; box.appendChild(m);
+    var need = !links || linksJob !== curJob || (r.has_mdr && !links.mdr) || (r.has_qa && !links.qa) || (!r.active && !links.log);
+    if (!need) armLinks();
+    else { linksJob = curJob; fetchLinks(curJob).then(armLinks).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); }); }
   }
   function pollDet() {
     clearTimeout(timer);
