@@ -732,9 +732,10 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
     @mcp.tool(name="mdr_elenco", title="Elenco generazioni", description="Usato solo dal pannello.",
               annotations=read_hints, meta=app_only)
     async def mdr_elenco(q: str = "", stato: str = "", limit: int = 10) -> dict:
+        started = time.monotonic()
         runs, more = await run(svc.list_runs, max(1, min(int(limit), 50)),
-                                 stato if stato in ("", "active", "succeeded", "failed", "cancelled") else "", (q or "")[:40])
-        return {"runs": runs, "altri": more}
+                               stato if stato in ("", "active", "succeeded", "failed", "cancelled") else "", (q or "")[:40])
+        return {"runs": runs, "altri": more, "ms": int((time.monotonic() - started) * 1000)}
 
     @mcp.tool(name="mdr_dettaglio", title="Dettaglio generazione", description="Usato solo dal pannello.",
               annotations=read_hints, meta=app_only)

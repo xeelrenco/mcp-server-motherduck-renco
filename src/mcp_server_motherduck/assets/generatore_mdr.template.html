@@ -80,7 +80,7 @@
 <section id="v-list" class="hide">
   <div class="bar2">
     <button class="sec" id="refresh">Aggiorna</button>
-    <button class="sec" id="selmode">Seleziona</button>
+    <button class="sec" id="selmode">Elimina</button>
     <span class="sp"></span>
     <button class="sec hide" id="selall">Seleziona tutte</button>
     <button class="danger hide" id="delsel" disabled>Elimina</button>
@@ -94,6 +94,7 @@
     <button class="sec hide" id="fclear">Azzera filtri</button>
   </div>
   <div id="list"></div>
+  <div id="meta" class="muted" style="margin-top:8px"></div>
 </section>
 
 <section id="v-det" class="hide">
@@ -136,8 +137,7 @@
     document.querySelectorAll(".tab").forEach(function (b) { b.classList.toggle("on", b.dataset.t === (tab === "det" ? "list" : tab)); });
     clearTimeout(timer);
     if (tab !== "list") { selecting = false; picked = {}; }
-    if (tab === "list" && !(seeded && !seedUsed)) loadList();
-    if (tab === "list") seedUsed = true;
+    if (tab === "list") loadList(false);
     if (tab === "det") pollDet();
   }
   document.querySelectorAll(".tab").forEach(function (b) { b.onclick = function () { show(b.dataset.t); }; });
@@ -196,6 +196,7 @@
       return call("mdr_avvia", { job_id: job });
     }).then(function (run) {
       files = []; busy = false; renderFiles(); say(box, "");
+      runs[run.job_id] = run; if (cache) { cache.runs.unshift(run); cache.at = 0; }
       curJob = run.job_id; show("det");
     }).catch(function (e) {
       busy = false; renderFiles(); say(box, String(e.message || e), "err");
@@ -227,7 +228,7 @@
     var n = pickedIds().length, btn = $("delsel");
     btn.disabled = n === 0; btn.textContent = n ? "Elimina (" + n + ")" : "Elimina";
     delete btn.dataset.sure; btn.className = "danger" + (selecting ? "" : " hide");
-    $("selmode").textContent = selecting ? "Fine selezione" : "Seleziona";
+    $("selmode").textContent = selecting ? "Annulla" : "Elimina";
     $("selall").classList.toggle("hide", !selecting);
     btn.classList.toggle("hide", !selecting);
     document.querySelectorAll("#list .card").forEach(function (c) {
@@ -257,7 +258,7 @@
     });
     if (d.altri) {
       var more = el("button", "sec", flimit >= 50 ? "Ce ne sono altre: affina i filtri" : "Mostra altre"); more.disabled = flimit >= 50;
-      more.onclick = function () { flimit = Math.min(flimit + 10, 50); loadList(); };
+      more.onclick = function () { flimit = Math.min(flimit + 10, 50); drawList(); };
       box.appendChild(more);
     }
     updateSel();
@@ -278,26 +279,59 @@
   }
   $("delsel").onclick = function () {
     confirmDelete(this, pickedIds(), function () { var n = pickedIds().length; return n ? "Elimina (" + n + ")" : "Elimina"; }, function (res) {
-      selecting = false; picked = {}; loadList();
+      selecting = false; picked = {};
+      if (cache) cache.runs = cache.runs.filter(function (r) { return res.eliminati.indexOf(r.job_id) < 0; });
+      drawList(); refresh();
       if (res.saltati.length) setTimeout(function () { say($("list"), res.saltati.length + " generazioni non eliminate (in corso).", ""); }, 0);
     });
   };
-  function loadList() {
-    var box = $("list"); skelList(box);
-    var tok = ++loadTok;
-    call("mdr_elenco", { q: fq, stato: fs, limit: flimit }).then(function (d) { if (tok !== loadTok) return; currentRuns = d.runs; currentMore = d.altri; renderList(d); }).catch(function (e) { say(box, String(e.message || e), "err"); });
+  // Elenco in memoria: i filtri lavorano sui dati già scaricati (nessuna attesa); il server si interroga solo per aggiornare.
+  var cache = null, loadTok = 0, refreshing = false;
+  function matches(r) {
+    var q = fq.toLowerCase();
+    if (q && String(r.project_code || "").toLowerCase().indexOf(q) < 0) return false;
+    if (fs === "active") return !!r.active;
+    return !fs || r.state === fs;
+  }
+  function fmtSec(ms) { return (ms / 1000).toFixed(1).replace(".", ",") + " s"; }
+  function drawList() {
+    if (!cache) return;
+    var all = cache.runs.filter(matches), shown = all.slice(0, flimit);
+    renderList({ runs: shown, altri: all.length > shown.length });
+    var t = new Date(cache.at), hh = ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
+    $("meta").textContent = (refreshing ? "Aggiorno… · " : "") + "Aggiornato alle " + hh +
+      (cache.total ? " · risposta in " + fmtSec(cache.total) + (cache.server != null ? " (server " + fmtSec(cache.server) + ")" : "") : "") +
+      (cache.complete ? "" : " · mostrate le ultime 50");
+  }
+  function refresh() {
+    if (refreshing) return;
+    refreshing = true; $("refresh").disabled = true; $("refresh").textContent = "Aggiorno…";
+    var t0 = Date.now();
+    call("mdr_elenco", { limit: 50 }).then(function (d) {
+      cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: Date.now() - t0, server: d.ms };
+    }).catch(function (e) {
+      if (!cache) say($("list"), String(e.message || e), "err"); else $("meta").textContent = "Aggiornamento non riuscito: " + String(e.message || e);
+    }).then(function () {
+      refreshing = false; $("refresh").disabled = false; $("refresh").textContent = "Aggiorna";
+      if (cache && !$("v-list").classList.contains("hide")) drawList();
+    });
+  }
+  function loadList(force) {
+    if (!cache) { skelList($("list")); refresh(); return; }
+    drawList();
+    if (force || Date.now() - cache.at > 30000) refresh();
   }
   var ftimer = null;
   function filtersChanged() {
     fq = $("fq").value.trim(); fs = $("fs").value; flimit = 10; picked = {};
     $("fclear").classList.toggle("hide", !(fq || fs));
-    loadList();
+    drawList();
   }
-  $("fq").oninput = function () { clearTimeout(ftimer); ftimer = setTimeout(filtersChanged, 450); };
+  $("fq").oninput = filtersChanged;
   $("fq").onkeydown = function (e) { if (e.key === "Enter") { clearTimeout(ftimer); filtersChanged(); } };
   $("fs").onchange = filtersChanged;
   $("fclear").onclick = function () { $("fq").value = ""; $("fs").value = ""; filtersChanged(); };
-  $("refresh").onclick = loadList;
+  $("refresh").onclick = function () { loadList(true); };
   $("back").onclick = function () { show("list"); };
 
   // ---- dettaglio
@@ -372,14 +406,14 @@
         }
         br.disabled = true; br.textContent = "Avvio…";
         call("mdr_rilancia", { job_id: curJob }).then(function (n) {
-          runs[n.job_id] = n; curJob = n.job_id; links = null; show("det");
+          runs[n.job_id] = n; if (cache) { cache.runs.unshift(n); cache.at = 0; } curJob = n.job_id; links = null; show("det");
         }).catch(function (e) { br.disabled = false; br.textContent = "Rilancia con gli stessi file"; br.className = "sec"; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
       }; a.appendChild(br);
     }
     if (!r.active) {
       var bd = el("button", "danger", "Elimina");
       bd.onclick = function () {
-        confirmDelete(bd, [r.job_id], function () { return "Elimina"; }, function () { seedUsed = true; show("list"); });
+        confirmDelete(bd, [r.job_id], function () { return "Elimina"; }, function (res) { if (cache) cache.runs = cache.runs.filter(function (r) { return res.eliminati.indexOf(r.job_id) < 0; }); show("list"); });
       }; a.appendChild(bd);
     }
     if (r.active) {
@@ -409,7 +443,7 @@
   app.ontoolresult = function (p) {
     var d = parse(p);
     if (d && d.max_file_mb) { MAXF = d.max_file_mb; MAXT = d.max_upload_mb || MAXT; }
-    if (d && d.runs && d.runs.length) { seeded = true; seedUsed = false; renderList({ runs: d.runs, altri: d.altri }); show("list"); }
+    if (d && d.runs && d.runs.length) { cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: 0, server: null }; show("list"); if (d.altri) refresh(); }
   };
   app.connect && app.connect();
   renderFiles();
