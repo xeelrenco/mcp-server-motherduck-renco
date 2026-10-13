@@ -45,6 +45,9 @@
   .msg { padding:8px 10px; border-radius:6px; margin:10px 0; font-size:13px; background:var(--wait-bg); color:var(--wait); }
   .msg.err { background:var(--err-bg); color:var(--err); } .msg.ok { background:var(--ok-bg); color:var(--ok); }
   .actions { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+  .sk { background:linear-gradient(90deg,var(--soft) 25%,var(--line) 50%,var(--soft) 75%); background-size:200% 100%; animation:sk 1.2s linear infinite; border-radius:6px; }
+  @keyframes sk { from { background-position:200% 0; } to { background-position:-200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .sk { animation:none; } }
   .hide { display:none; }
   dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0; font-size:13px; } dt { color:var(--muted); }
 </style>
@@ -165,7 +168,7 @@ window.__mcpApps={App:OO};})();</script>
 <script>
 (function () {
   var MAXF = 32, MAXT = 100;
-  var files = [], busy = false, curJob = null, timer = null;
+  var files = [], busy = false, curJob = null, timer = null, seeded = false, seedUsed = false;
   var $ = function (id) { return document.getElementById(id); };
   function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; }
   function mb(n) { return (n / 1048576).toFixed(1) + " MB"; }
@@ -195,7 +198,8 @@ window.__mcpApps={App:OO};})();</script>
     ["new", "list", "det"].forEach(function (t) { $("v-" + t).classList.toggle("hide", t !== tab); });
     document.querySelectorAll(".tab").forEach(function (b) { b.classList.toggle("on", b.dataset.t === (tab === "det" ? "list" : tab)); });
     clearTimeout(timer);
-    if (tab === "list") loadList();
+    if (tab === "list" && !(seeded && !seedUsed)) loadList();
+    if (tab === "list") seedUsed = true;
     if (tab === "det") pollDet();
   }
   document.querySelectorAll(".tab").forEach(function (b) { b.onclick = function () { show(b.dataset.t); }; });
@@ -262,21 +266,39 @@ window.__mcpApps={App:OO};})();</script>
 
   // ---- elenco
   function badge(run) { return el("span", "st " + run.state, run.state_label); }
+  function skel(w, h) { var d = el("div", "sk"); d.style.width = w; d.style.height = h; return d; }
+  function skelList(box) {
+    box.textContent = "";
+    for (var i = 0; i < 4; i++) {
+      var c = el("div", "card"), row = el("div", "row");
+      row.appendChild(skel("45%", "16px")); row.appendChild(skel("70px", "20px")); c.appendChild(row);
+      var m = skel("30%", "12px"); m.style.marginTop = "8px"; c.appendChild(m); box.appendChild(c);
+    }
+  }
+  function skelDet(box) {
+    box.textContent = "";
+    var row = el("div", "row"); row.appendChild(skel("45%", "18px")); row.appendChild(skel("80px", "20px")); box.appendChild(row);
+    var bar = skel("100%", "8px"); bar.style.margin = "10px 0"; box.appendChild(bar);
+    for (var i = 0; i < 4; i++) { var l = skel(60 + i * 8 + "%", "12px"); l.style.marginBottom = "8px"; box.appendChild(l); }
+    var act = el("div", "actions"); act.appendChild(skel("110px", "30px")); act.appendChild(skel("150px", "30px")); act.appendChild(skel("60px", "30px")); box.appendChild(act);
+  }
+  var runs = {};
+  function renderList(d) {
+    var box = $("list"); box.textContent = "";
+    if (!d.runs.length) { box.appendChild(el("p", "muted", "Nessuna generazione.")); return; }
+    d.runs.forEach(function (r) {
+      runs[r.job_id] = r;
+      var c = el("div", "card click"), row = el("div", "row");
+      row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
+      c.appendChild(el("div", "muted", r.created_label + (r.active ? " · " + (r.step_label || "") : "")));
+      c.onclick = function () { curJob = r.job_id; show("det"); };
+      box.appendChild(c);
+    });
+    if (d.altri) box.appendChild(el("p", "muted", "Sono mostrate le ultime 10 generazioni."));
+  }
   function loadList() {
-    var box = $("list"); box.textContent = "Carico…";
-    call("mdr_elenco", { limit: 10 }).then(function (d) {
-      box.textContent = "";
-      if (!d.runs.length) { box.appendChild(el("p", "muted", "Nessuna generazione.")); return; }
-      d.runs.forEach(function (r) {
-        var c = el("div", "card click"), row = el("div", "row");
-        row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
-        var meta = r.created_label + (r.active ? " · " + (r.step_label || "") : "");
-        c.appendChild(el("div", "muted", meta));
-        c.onclick = function () { curJob = r.job_id; show("det"); };
-        box.appendChild(c);
-      });
-      if (d.altri) box.appendChild(el("p", "muted", "Sono mostrate le ultime 10 generazioni."));
-    }).catch(function (e) { say(box, String(e.message || e), "err"); });
+    var box = $("list"); skelList(box);
+    call("mdr_elenco", { limit: 10 }).then(renderList).catch(function (e) { say(box, String(e.message || e), "err"); });
   }
   $("refresh").onclick = loadList;
   $("back").onclick = function () { show("list"); };
@@ -341,7 +363,6 @@ window.__mcpApps={App:OO};})();</script>
     if (r.error) box.appendChild(el("div", "msg err", r.error));
     var a = el("div", "actions");
     if (r.has_mdr) a.appendChild(makeLink("Scarica MDR", "mdr", "", ""));
-    if (r.has_qa) a.appendChild(makeLink("Scarica report qualità", "qa", "", "sec"));
     if (!r.active) a.appendChild(makeLink("Log", "log", "", "sec"));
     r.sow_files.forEach(function (n) { a.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
     if (r.active) {
@@ -352,15 +373,17 @@ window.__mcpApps={App:OO};})();</script>
     }
     box.appendChild(a);
     var m = el("div"); m.id = "detmsg"; box.appendChild(m);
-    var need = !links || linksJob !== curJob || (r.has_mdr && !links.mdr) || (r.has_qa && !links.qa) || (!r.active && !links.log);
+    var need = !links || linksJob !== curJob || (r.has_mdr && !links.mdr) || (!r.active && !links.log);
     if (!need) armLinks();
     else { linksJob = curJob; fetchLinks(curJob).then(armLinks).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); }); }
   }
   function pollDet() {
     clearTimeout(timer);
     var job = curJob;
+    if (runs[job]) drawDet(runs[job]); else skelDet($("det")); // subito i dati già noti, poi l'aggiornamento
     call("mdr_dettaglio", { job_id: job }).then(function (r) {
       if (job !== curJob || $("v-det").classList.contains("hide")) return;
+      runs[r.job_id] = r;
       drawDet(r);
       if (r.active) timer = setTimeout(pollDet, 5000);
     }).catch(function (e) { say($("det"), String(e.message || e), "err"); });
@@ -369,7 +392,7 @@ window.__mcpApps={App:OO};})();</script>
   app.ontoolresult = function (p) {
     var d = parse(p);
     if (d && d.max_file_mb) { MAXF = d.max_file_mb; MAXT = d.max_upload_mb || MAXT; }
-    if (d && d.attive) show("list");
+    if (d && d.runs && d.runs.length) { seeded = true; seedUsed = false; renderList({ runs: d.runs, altri: d.altri }); show("list"); }
   };
   app.connect && app.connect();
   renderFiles();

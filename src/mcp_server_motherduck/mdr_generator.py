@@ -393,7 +393,6 @@ class GeneratorService:
             "error": run.get("error"),
             "sow_files": run.get("sow_files") or [],
             "has_mdr": bool(outputs.get("mdr")),
-            "has_qa": bool(outputs.get("qa_report")),
             "summary": _public_summary(run.get("summary")),
         }
 
@@ -556,8 +555,6 @@ class GeneratorService:
         outputs = run.get("outputs") or {}
         if kind == "mdr":
             key, filename, ctype, disp = outputs.get("mdr"), None, XLSX, "attachment"
-        elif kind == "qa":
-            key, filename, ctype, disp = outputs.get("qa_report"), None, XLSX, "attachment"
         elif kind == "log":
             key, filename, ctype, disp = f"jobs/{job_id}/log.txt", f"log-{job_id}.txt", "text/plain", "attachment"
         elif kind == "sow":
@@ -583,8 +580,6 @@ class GeneratorService:
         out: Dict[str, Any] = {"scadenza_minuti": LINK_MINUTES, "sow": {}}
         if outputs.get("mdr"):
             out["mdr"] = one(outputs["mdr"], None, XLSX, "attachment")
-        if outputs.get("qa_report"):
-            out["qa"] = one(outputs["qa_report"], None, XLSX, "attachment")
         if run.get("state") in ("succeeded", "failed", "cancelled"):
             out["log"] = one(f"jobs/{job_id}/log.txt", f"log-{job_id}.txt", "text/plain", "attachment")
         for name in run.get("sow_files") or []:
@@ -669,8 +664,9 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
         meta={"ui": {"resourceUri": GEN_URI, "visibility": ["model", "app"]}},
     )
     async def apri_generatore_mdr() -> dict:
-        runs, _ = await run(svc.list_runs, 30, "active")
-        return {"messaggio": "Pannello del Generatore MDR aperto.", "attive": len(runs),
+        runs, more = await run(svc.list_runs, 10)  # l'elenco arriva col pannello: si vede subito
+        return {"messaggio": "Pannello del Generatore MDR aperto.",
+                "attive": sum(1 for r in runs if r["active"]), "runs": runs, "altri": more,
                 "max_file_mb": svc.max_file_mb, "max_upload_mb": svc.max_total_mb}
 
     @mcp.tool(
