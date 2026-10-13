@@ -58,6 +58,12 @@
   .bar2 { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 10px; }
   .bar2 .sp { flex:1; }
   .hide { display:none; }
+  .ops { display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
+  .ops .danger { margin-left:auto; }
+  .actions.files { align-items:center; margin-top:4px; }
+  .empty { text-align:center; padding:28px 12px; color:var(--muted); }
+  .empty button { margin-top:10px; }
+  .sub { margin-top:6px; }
   dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0; font-size:13px; } dt { color:var(--muted); }
 </style>
 </head>
@@ -77,7 +83,9 @@
   <label>Scope of Work (PDF)</label>
   <div class="drop" id="drop">Trascina qui i PDF oppure clicca per sceglierli<input type="file" id="file" accept="application/pdf,.pdf" multiple class="hide"></div>
   <ul class="files" id="files"></ul>
+  <div id="tot" class="muted"></div>
   <div class="actions"><button id="go" disabled>Avvia generazione</button></div>
+  <div id="hint" class="muted"></div>
   <div id="newmsg"></div>
 </section>
 
@@ -140,7 +148,7 @@
     ["new", "list", "det"].forEach(function (t) { $("v-" + t).classList.toggle("hide", t !== tab); });
     document.querySelectorAll(".tab").forEach(function (b) { b.classList.toggle("on", b.dataset.t === (tab === "det" ? "list" : tab)); });
     clearTimeout(timer);
-    if (tab !== "list") { selecting = false; picked = {}; }
+    if (tab !== "list") { selecting = false; picked = {}; clearTimeout(ltimer); }
     if (tab === "list") loadList(false);
     if (tab === "det") pollDet();
   }
@@ -154,7 +162,11 @@
       var x = el("button", "x", "×"); x.title = "Rimuovi"; x.onclick = function () { if (!busy) { files.splice(i, 1); renderFiles(); } };
       li.appendChild(x); ul.appendChild(li);
     });
-    $("go").disabled = cfgError || busy || !files.length || !$("code").value.trim();
+    var tot = files.reduce(function (a, f) { return a + f.size; }, 0), code = $("code").value.trim();
+    $("tot").textContent = files.length ? files.length + (files.length === 1 ? " file · " : " file · ") + mb(tot) + " su " + MAXT + " MB" : "";
+    $("go").disabled = cfgError || busy || !files.length || !code;
+    $("hint").textContent = (cfgError || busy || (files.length && code)) ? "" :
+      (!code && !files.length ? "Inserisci il codice progetto e carica almeno un PDF." : !code ? "Inserisci il codice progetto." : "Carica almeno un PDF.");
   }
   function addFiles(list) {
     var msgs = [];
@@ -240,10 +252,27 @@
       var k = c.querySelector(".chk"); if (k) k.checked = on;
     });
   }
+  function sumText(r) {
+    var s = r.summary || {}, p = [];
+    if (s["Righe MDR"] != null) p.push(s["Righe MDR"] + " righe");
+    if (s["Documenti"] != null) p.push(s["Documenti"] + " documenti");
+    if (s["Durata (minuti)"] != null) p.push(Math.round(s["Durata (minuti)"]) + " min");
+    return p.join(" · ");
+  }
+  function tabCount() {
+    var n = cache ? cache.runs.filter(function (r) { return r.active; }).length : 0;
+    document.querySelector('.tab[data-t="list"]').textContent = "Generazioni" + (n ? " · " + n + " in corso" : "");
+  }
   function renderList(d) {
     currentRuns = d.runs; currentMore = d.altri;
     var box = $("list"); box.textContent = "";
-    if (!d.runs.length) { box.appendChild(el("p", "muted", fq || fs ? "Nessuna generazione corrisponde ai filtri." : "Nessuna generazione.")); updateSel(); return; }
+    if (!d.runs.length) {
+      var em = el("div", "empty"), filt = !!(fq || fs);
+      em.appendChild(el("div", "", filt ? "Nessuna generazione corrisponde ai filtri." : "Non c'è ancora nessuna generazione."));
+      var eb = el("button", "sec", filt ? "Azzera filtri" : "Nuova generazione");
+      eb.onclick = function () { if (filt) $("fclear").onclick(); else show("new"); };
+      em.appendChild(eb); box.appendChild(em); updateSel(); return;
+    }
     d.runs.forEach(function (r) {
       runs[r.job_id] = r;
       var c = el("div", "card click"), row = el("div", "row"); c.dataset.job = r.job_id;
@@ -254,6 +283,8 @@
       }
       row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
       c.appendChild(el("div", "muted", r.created_label + (r.active ? " · " + (r.step_label || "") : "")));
+      if (r.active) { var pb = el("div", "bar"), pi = el("i"); pi.style.width = r.progress + "%"; pb.appendChild(pi); c.appendChild(pb); }
+      else if (r.state === "succeeded" && sumText(r)) c.appendChild(el("div", "muted sub", sumText(r)));
       c.onclick = function () {
         if (selecting) { if (!r.active) { picked[r.job_id] = !picked[r.job_id]; updateSel(); } return; }
         curJob = r.job_id; show("det");
@@ -290,7 +321,7 @@
     });
   };
   // Elenco in memoria: i filtri lavorano sui dati già scaricati (nessuna attesa); il server si interroga solo per aggiornare.
-  var cache = null, loadTok = 0, refreshing = false;
+  var cache = null, loadTok = 0, refreshing = false, ltimer = null;
   function matches(r) {
     var q = fq.toLowerCase();
     if (q && String(r.project_code || "").toLowerCase().indexOf(q) < 0) return false;
@@ -301,8 +332,11 @@
     if (!cache) return;
     var all = cache.runs.filter(matches), shown = all.slice(0, flimit);
     renderList({ runs: shown, altri: all.length > shown.length });
+    tabCount();
     var t = new Date(cache.at), hh = ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
     $("meta").textContent = (refreshing ? "Aggiorno… · " : "") + "Aggiornato alle " + hh;
+    clearTimeout(ltimer);  // finché c'è qualcosa in corso l'elenco si aggiorna da solo
+    if (!selecting && cache.runs.some(function (r) { return r.active; }) && !$("v-list").classList.contains("hide")) ltimer = setTimeout(refresh, 8000);
   }
   function refresh() {
     if (refreshing) return;
@@ -313,7 +347,7 @@
     }).catch(function (e) {
       if (!cache) say($("list"), String(e.message || e), "err"); else $("meta").textContent = "Aggiornamento non riuscito: " + String(e.message || e);
     }).then(function () {
-      refreshing = false; $("refresh").disabled = false; $("refresh").textContent = "Aggiorna";
+      refreshing = false; $("refresh").disabled = false; $("refresh").textContent = "Aggiorna"; tabCount();
       if (cache && !$("v-list").classList.contains("hide")) drawList();
     });
   }
@@ -379,7 +413,7 @@
   function drawDet(r, loading) {
     var box = $("det"); box.textContent = "";
     var row = el("div", "row"); row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
-    if (r.active || r.state === "succeeded") {
+    if (r.active) {
       var bar = el("div", "bar"), i = el("i"); i.style.width = r.progress + "%"; bar.appendChild(i); box.appendChild(bar);
       box.appendChild(el("div", "muted", (r.step_label || "") + " · " + r.progress + "%"));
     }
@@ -389,7 +423,9 @@
     if (r.start_label) d.appendChild(dl("Inizio progetto", r.start_label));
     if (r.sow_files.length) d.appendChild(dl("SoW", r.sow_files.join(", ")));
     if (r.summary && typeof r.summary === "object") Object.keys(r.summary).forEach(function (k) {
-      var v = r.summary[k]; if (v !== null && typeof v !== "object") d.appendChild(dl(k.replace(/_/g, " "), String(v)));
+      var v = r.summary[k]; if (v === null || typeof v === "object") return;
+      if (k === "Durata (minuti)" && typeof v === "number") d.appendChild(dl("Durata", Math.round(v) + " min"));
+      else d.appendChild(dl(k.replace(/_/g, " "), String(v)));
     });
     box.appendChild(d);
     if (r.error) box.appendChild(el("div", "msg err", r.error));
@@ -411,10 +447,10 @@
       }
       return;
     }
-    var a = el("div", "actions");
+    var a = el("div", "actions"), fl = el("div", "actions files"), ops = el("div", "ops");
     if (r.has_mdr) a.appendChild(makeLink("Scarica MDR", "mdr", "", ""));
-    if (!r.active) a.appendChild(makeLink("Log", "log", "", "sec"));
-    r.sow_files.forEach(function (n) { a.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
+    if (!r.active) fl.appendChild(makeLink("Log", "log", "", "sec"));
+    r.sow_files.forEach(function (n) { fl.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
     if (!r.active && r.sow_files.length) {
       var br = el("button", "sec", "Rilancia con gli stessi file");
       br.onclick = function () {
@@ -427,21 +463,23 @@
         call("mdr_rilancia", { job_id: curJob }).then(function (n) {
           runs[n.job_id] = n; if (cache) { cache.runs.unshift(n); cache.at = 0; } curJob = n.job_id; links = null; show("det");
         }).catch(function (e) { br.disabled = false; br.textContent = "Rilancia con gli stessi file"; br.className = "sec"; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
-      }; a.appendChild(br);
+      }; ops.appendChild(br);
     }
     if (!r.active) {
       var bd = el("button", "danger", "Elimina");
       bd.onclick = function () {
         confirmDelete(bd, [r.job_id], function () { return "Elimina"; }, function (res) { if (cache) cache.runs = cache.runs.filter(function (r) { return res.eliminati.indexOf(r.job_id) < 0; }); show("list"); });
-      }; a.appendChild(bd);
+      }; ops.appendChild(bd);
     }
     if (r.active) {
       var bc = el("button", "danger", "Annulla"); bc.onclick = function () {
         bc.disabled = true;
         call("mdr_annulla", { job_id: curJob }).then(drawDet).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); bc.disabled = false; });
-      }; a.appendChild(bc);
+      }; ops.appendChild(bc);
     }
-    box.appendChild(a);
+    if (a.childNodes.length) box.appendChild(a);
+    if (fl.childNodes.length) { var fh = el("span", "muted", "File:"); fl.insertBefore(fh, fl.firstChild); box.appendChild(fl); }
+    if (ops.childNodes.length) box.appendChild(ops);
     var m = el("div"); m.id = "detmsg"; box.appendChild(m);
     armLinks();
   }
@@ -452,6 +490,7 @@
     call("mdr_dettaglio", { job_id: job }).then(function (r) {
       if (job !== curJob || $("v-det").classList.contains("hide")) return;
       runs[r.job_id] = r;
+      if (cache) { var ix = cache.runs.findIndex(function (x) { return x.job_id === r.job_id; }); if (ix >= 0) cache.runs[ix] = r; tabCount(); }
       drawDet(r);
       if (r.active) timer = setTimeout(function () { pollDet(true); }, 5000);
     }).catch(function (e) { say($("det"), String(e.message || e), "err"); });
