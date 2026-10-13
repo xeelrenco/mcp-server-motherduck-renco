@@ -15,6 +15,7 @@ from mcp.types import Icon
 from .configs import SERVER_VERSION
 from .database import DatabaseClient
 from .instructions import get_instructions
+from .mdr_generator import register_mdr_generator
 from .mdr_panel import register_mdr_panel
 from .tools.execute_query import execute_query as execute_query_fn
 from .tools.list_columns import list_columns as list_columns_fn
@@ -269,6 +270,9 @@ def create_mcp_server(
 
     # Pannello MDR di prova (MCP Apps), attivo solo con MDR_PANEL_ENABLED=true
     register_mdr_panel(mcp, db_client)
+
+    # Generatore MDR in chat (MCP Apps), attivo solo con MDR_GENERATOR_ENABLED=true
+    register_mdr_generator(mcp)
 
     logger.info(f"FastMCP server created with {len(mcp._tool_manager._tools)} tools")
 

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generatore MDR</title>
+<style>
+  :root { --bg:#ffffff; --text:#1d2330; --muted:#5d6677; --line:#e2e5eb; --accent:#1f5fae; --soft:#f4f6fa;
+          --ok:#1e7a46; --ok-bg:#e5f4ec; --err:#b3261e; --err-bg:#fbe9e7; --wait:#8a5a00; --wait-bg:#fdf3dc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c2027; --text:#e7eaf0; --muted:#9aa3b2; --line:#2c323c; --accent:#5b9bea; --soft:#252a33;
+            --ok:#6fd39b; --ok-bg:#173325; --err:#ff8a80; --err-bg:#3a1b19; --wait:#f2c05c; --wait-bg:#3a2f14; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:14px; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  h1 { font-size:17px; margin:0 0 10px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:12px; }
+  .tab { background:none; color:var(--muted); border:0; border-bottom:2px solid transparent; border-radius:0; padding:6px 12px; font-weight:600; }
+  .tab.on { color:var(--accent); border-bottom-color:var(--accent); }
+  label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin:10px 0 3px; }
+  input[type=text], input[type=date] { width:100%; max-width:320px; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit; }
+  .drop { border:2px dashed var(--line); border-radius:8px; padding:14px; text-align:center; color:var(--muted); cursor:pointer; background:var(--soft); }
+  .drop.over { border-color:var(--accent); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:7px 14px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  button.sec { background:var(--soft); color:var(--text); border:1px solid var(--line); }
+  button.danger { background:var(--err-bg); color:var(--err); border:1px solid var(--err); }
+  button[disabled] { opacity:.5; cursor:default; }
+  .files { list-style:none; padding:0; margin:8px 0; }
+  .files li { display:flex; gap:8px; align-items:center; padding:5px 8px; border:1px solid var(--line); border-radius:6px; margin-bottom:4px; font-size:13px; }
+  .files .n { flex:1; word-break:break-all; } .files .s { color:var(--muted); font-size:12px; }
+  .files .x { background:none; color:var(--muted); padding:0 6px; font-size:16px; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .card.click { cursor:pointer; } .card.click:hover { border-color:var(--accent); }
+  .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .name { font-weight:600; flex:1; min-width:140px; }
+  .st { font-size:12px; font-weight:600; padding:2px 9px; border-radius:999px; background:var(--wait-bg); color:var(--wait); }
+  .st.succeeded { background:var(--ok-bg); color:var(--ok); } .st.failed { background:var(--err-bg); color:var(--err); }
+  .st.cancelled { background:var(--soft); color:var(--muted); }
+  .muted { color:var(--muted); font-size:12px; }
+  .bar { height:8px; background:var(--soft); border-radius:99px; overflow:hidden; margin:8px 0 4px; border:1px solid var(--line); }
+  .bar > i { display:block; height:100%; background:var(--accent); transition:width .4s; }
+  .msg { padding:8px 10px; border-radius:6px; margin:10px 0; font-size:13px; background:var(--wait-bg); color:var(--wait); }
+  .msg.err { background:var(--err-bg); color:var(--err); } .msg.ok { background:var(--ok-bg); color:var(--ok); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+  .hide { display:none; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0; font-size:13px; } dt { color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>Generatore MDR</h1>
+<div class="tabs">
+  <button class="tab on" data-t="new">Nuova generazione</button>
+  <button class="tab" data-t="list">Generazioni</button>
+</div>
+
+<section id="v-new">
+  <label for="code">Codice progetto</label>
+  <input type="text" id="code" maxlength="40" placeholder="es. 5890" autocomplete="off">
+  <label for="sd">Data di inizio progetto (facoltativa)</label>
+  <input type="date" id="sd">
+  <label>Scope of Work (PDF)</label>
+  <div class="drop" id="drop">Trascina qui i PDF oppure clicca per sceglierli<input type="file" id="file" accept="application/pdf,.pdf" multiple class="hide"></div>
+  <ul class="files" id="files"></ul>
+  <div class="actions"><button id="go" disabled>Avvia generazione</button></div>
+  <div id="newmsg"></div>
+</section>
+
+<section id="v-list" class="hide">
+  <div class="actions"><button class="sec" id="refresh">Aggiorna</button></div>
+  <div id="list"></div>
+</section>
+
+<section id="v-det" class="hide">
+  <div class="actions"><button class="sec" id="back">← Torna all'elenco</button></div>
+  <div id="det"></div>
+</section>
+
+<script>/*__MCP_APPS_SDK__*/</script>
+<script>
+(function () {
+  var MAXF = 32, MAXT = 100;
+  var files = [], busy = false, curJob = null, timer = null;
+  var $ = function (id) { return document.getElementById(id); };
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; }
+  function mb(n) { return (n / 1048576).toFixed(1) + " MB"; }
+  function parse(res) {
+    if (res && res.structuredContent) return res.structuredContent;
+    var t = ((res && res.content) || []).filter(function (c) { return c.type === "text"; }).map(function (c) { return c.text; }).join(" ");
+    try { return JSON.parse(t); } catch (e) { return null; }
+  }
+  function errText(res) {
+    var t = ((res && res.content) || []).map(function (c) { return c.text || ""; }).join(" ").trim();
+    return t || "Operazione non riuscita.";
+  }
+
+  var sdk = window.__mcpApps;
+  if (!sdk || !sdk.App) { document.body.textContent = "Il pannello non si è caricato correttamente."; return; }
+  var app = new sdk.App({ name: "Generatore MDR", version: "1.0.0" }, {});
+  function call(name, args) {
+    return app.callServerTool({ name: name, arguments: args || {} }).then(function (res) {
+      if (res && res.isError) throw new Error(errText(res));
+      return parse(res) || {};
+    });
+  }
+  function say(box, text, kind) { box.textContent = ""; if (text) { var m = el("div", "msg " + (kind || ""), text); box.appendChild(m); } }
+
+  // ---- schede
+  function show(tab) {
+    ["new", "list", "det"].forEach(function (t) { $("v-" + t).classList.toggle("hide", t !== tab); });
+    document.querySelectorAll(".tab").forEach(function (b) { b.classList.toggle("on", b.dataset.t === (tab === "det" ? "list" : tab)); });
+    clearTimeout(timer);
+    if (tab === "list") loadList();
+    if (tab === "det") pollDet();
+  }
+  document.querySelectorAll(".tab").forEach(function (b) { b.onclick = function () { show(b.dataset.t); }; });
+
+  // ---- nuova generazione
+  function renderFiles() {
+    var ul = $("files"); ul.textContent = "";
+    files.forEach(function (f, i) {
+      var li = el("li"); li.appendChild(el("span", "n", f.name)); li.appendChild(el("span", "s", mb(f.size)));
+      var x = el("button", "x", "×"); x.title = "Rimuovi"; x.onclick = function () { if (!busy) { files.splice(i, 1); renderFiles(); } };
+      li.appendChild(x); ul.appendChild(li);
+    });
+    $("go").disabled = busy || !files.length || !$("code").value.trim();
+  }
+  function addFiles(list) {
+    var msgs = [];
+    Array.prototype.forEach.call(list, function (f) {
+      if (!/\.pdf$/i.test(f.name)) { msgs.push("'" + f.name + "' non è un PDF."); return; }
+      if (f.size > MAXF * 1048576) { msgs.push("'" + f.name + "' supera " + MAXF + " MB."); return; }
+      if (files.some(function (g) { return g.name === f.name && g.size === f.size; })) return;
+      files.push(f);
+    });
+    var tot = files.reduce(function (a, f) { return a + f.size; }, 0);
+    if (tot > MAXT * 1048576) { msgs.push("Totale oltre " + MAXT + " MB."); }
+    say($("newmsg"), msgs.join(" "), msgs.length ? "err" : "");
+    renderFiles();
+  }
+  $("drop").onclick = function () { $("file").click(); };
+  $("file").onchange = function () { addFiles(this.files); this.value = ""; };
+  $("drop").ondragover = function (e) { e.preventDefault(); this.classList.add("over"); };
+  $("drop").ondragleave = function () { this.classList.remove("over"); };
+  $("drop").ondrop = function (e) { e.preventDefault(); this.classList.remove("over"); addFiles(e.dataTransfer.files); };
+  $("code").oninput = renderFiles;
+
+  function put(url, file) {
+    return fetch(url, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file }).then(function (r) {
+      if (!r.ok) throw new Error("Caricamento di '" + file.name + "' non riuscito (" + r.status + ").");
+    });
+  }
+  $("go").onclick = function () {
+    if (busy) return;
+    busy = true; renderFiles();
+    var box = $("newmsg"), job = null;
+    say(box, "Preparo il caricamento…");
+    call("mdr_prepara_upload", {
+      project_code: $("code").value.trim(), start_date: $("sd").value || "",
+      files: files.map(function (f) { return { name: f.name, size: f.size }; })
+    }).then(function (p) {
+      job = p.job_id;
+      var n = 0;
+      return Promise.all(p.uploads.map(function (u, i) {
+        return put(u.url, files[i]).then(function () { n++; say(box, "Caricati " + n + " di " + files.length + " PDF…"); });
+      }));
+    }).then(function () {
+      say(box, "Avvio la generazione…");
+      return call("mdr_avvia", { job_id: job });
+    }).then(function (run) {
+      files = []; busy = false; renderFiles(); say(box, "");
+      curJob = run.job_id; show("det");
+    }).catch(function (e) {
+      busy = false; renderFiles(); say(box, String(e.message || e), "err");
+    });
+  };
+
+  // ---- elenco
+  function badge(run) { return el("span", "st " + run.state, run.state_label); }
+  function loadList() {
+    var box = $("list"); box.textContent = "Carico…";
+    call("mdr_elenco", { limit: 10 }).then(function (d) {
+      box.textContent = "";
+      if (!d.runs.length) { box.appendChild(el("p", "muted", "Nessuna generazione.")); return; }
+      d.runs.forEach(function (r) {
+        var c = el("div", "card click"), row = el("div", "row");
+        row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
+        var meta = r.created_label + (r.active ? " · " + (r.step_label || "") : "");
+        c.appendChild(el("div", "muted", meta));
+        c.onclick = function () { curJob = r.job_id; show("det"); };
+        box.appendChild(c);
+      });
+      if (d.altri) box.appendChild(el("p", "muted", "Sono mostrate le ultime 10 generazioni."));
+    }).catch(function (e) { say(box, String(e.message || e), "err"); });
+  }
+  $("refresh").onclick = loadList;
+  $("back").onclick = function () { show("list"); };
+
+  // ---- dettaglio
+  function dl(label, value) { var f = document.createDocumentFragment(); f.appendChild(el("dt", "", label)); f.appendChild(el("dd", "", value)); f.lastChild.style.margin = 0; return f; }
+  function download(kind, name) {
+    call("mdr_link", { job_id: curJob, tipo: kind, nome: name || "" }).then(function (l) {
+      return app.openLink({ url: l.url });
+    }).then(function (r) {
+      if (r && r.isError) say($("detmsg"), "La chat non ha aperto il link. Riprova.", "err");
+    }).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); });
+  }
+  function drawDet(r) {
+    var box = $("det"); box.textContent = "";
+    var row = el("div", "row"); row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
+    if (r.active || r.state === "succeeded") {
+      var bar = el("div", "bar"), i = el("i"); i.style.width = r.progress + "%"; bar.appendChild(i); box.appendChild(bar);
+      box.appendChild(el("div", "muted", (r.step_label || "") + " · " + r.progress + "%"));
+    }
+    var d = el("dl");
+    d.appendChild(dl("Avviata", r.created_label || "-"));
+    if (r.finished_label) d.appendChild(dl("Terminata", r.finished_label));
+    if (r.start_label) d.appendChild(dl("Inizio progetto", r.start_label));
+    if (r.sow_files.length) d.appendChild(dl("SoW", r.sow_files.join(", ")));
+    if (r.summary && typeof r.summary === "object") Object.keys(r.summary).forEach(function (k) {
+      var v = r.summary[k]; if (v !== null && typeof v !== "object") d.appendChild(dl(k.replace(/_/g, " "), String(v)));
+    });
+    box.appendChild(d);
+    if (r.error) box.appendChild(el("div", "msg err", r.error));
+    var a = el("div", "actions");
+    if (r.has_mdr) { var b1 = el("button", "", "Scarica MDR"); b1.onclick = function () { download("mdr"); }; a.appendChild(b1); }
+    if (r.has_qa) { var b2 = el("button", "sec", "Report qualità"); b2.onclick = function () { download("qa"); }; a.appendChild(b2); }
+    var b3 = el("button", "sec", "Log"); b3.onclick = function () { download("log"); }; a.appendChild(b3);
+    r.sow_files.forEach(function (n) { var b = el("button", "sec", "SoW: " + n); b.onclick = function () { download("sow", n); }; a.appendChild(b); });
+    if (r.active) {
+      var bc = el("button", "danger", "Annulla"); bc.onclick = function () {
+        bc.disabled = true;
+        call("mdr_annulla", { job_id: curJob }).then(drawDet).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); bc.disabled = false; });
+      }; a.appendChild(bc);
+    }
+    box.appendChild(a);
+    var m = el("div"); m.id = "detmsg"; box.appendChild(m);
+  }
+  function pollDet() {
+    clearTimeout(timer);
+    var job = curJob;
+    call("mdr_dettaglio", { job_id: job }).then(function (r) {
+      if (job !== curJob || $("v-det").classList.contains("hide")) return;
+      drawDet(r);
+      if (r.active) timer = setTimeout(pollDet, 5000);
+    }).catch(function (e) { say($("det"), String(e.message || e), "err"); });
+  }
+
+  app.ontoolresult = function (p) {
+    var d = parse(p);
+    if (d && d.max_file_mb) { MAXF = d.max_file_mb; MAXT = d.max_upload_mb || MAXT; }
+    if (d && d.attive) show("list");
+  };
+  app.connect && app.connect();
+  renderFiles();
+})();
+</script>
+</body>
+</html>

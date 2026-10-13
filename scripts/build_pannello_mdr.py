@@ -1,4 +1,4 @@
-"""Genera assets/pannello_mdr.html inserendo la libreria MCP Apps nel template.
+"""Genera assets/pannello_mdr.html e assets/generatore_mdr.html inserendo la libreria MCP Apps nel template.
 
 Uso (dalla cartella del progetto):
     npm install --prefix build-ui @modelcontextprotocol/ext-apps@2.0.3
@@ -27,10 +27,11 @@ def main(sdk_dir: str) -> None:
     js = "(function(){" + bundle[: m[0].start()] + "\nwindow.__mcpApps={App:%s};})();" % names["App"]
     if "</script" in js.lower():
         raise SystemExit("La libreria contiene </script>: non si può inserire nella pagina")
-    template = (ASSETS / "pannello_mdr.template.html").read_text(encoding="utf-8")
-    out = template.replace("/*__MCP_APPS_SDK__*/", f"/* @modelcontextprotocol/ext-apps {version} (MIT) */\n" + js)
-    (ASSETS / "pannello_mdr.html").write_text(out, encoding="utf-8", newline="\n")
-    print(f"Scritto {ASSETS / 'pannello_mdr.html'} ({len(out)} caratteri, ext-apps {version})")
+    for name in ("pannello_mdr", "generatore_mdr"):
+        template = (ASSETS / f"{name}.template.html").read_text(encoding="utf-8")
+        out = template.replace("/*__MCP_APPS_SDK__*/", f"/* @modelcontextprotocol/ext-apps {version} (MIT) */\n" + js)
+        (ASSETS / f"{name}.html").write_text(out, encoding="utf-8", newline="\n")
+        print(f"Scritto {ASSETS / (name + '.html')} ({len(out)} caratteri, ext-apps {version})")
 
 
 if __name__ == "__main__":

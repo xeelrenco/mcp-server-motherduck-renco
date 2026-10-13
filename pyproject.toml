@@ -9,6 +9,8 @@ dependencies = [
     "fastmcp>=2.14,<3",
     "click>=8.1.8",
     "pytz>=2025.2",
+    "google-cloud-storage>=2.16",
+    "google-cloud-run>=0.10",
 ]
 
 [[project.authors]]
