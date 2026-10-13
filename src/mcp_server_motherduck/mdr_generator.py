@@ -334,6 +334,24 @@ def _fmt_date(value: Optional[str]) -> str:
         return value
 
 
+def _explain_failure(run: Dict) -> str:
+    """Causa in italiano, leggibile da un utente non tecnico, per una generazione fallita."""
+    text = " ".join([str(run.get("error") or "")] + [str(x) for x in (run.get("log_tail") or [])]).lower()
+    rules = [
+        (("nessun aggiornamento", "considerata interrotta"), "La generazione si è fermata senza dare più notizie. Di solito basta riprovare."),
+        (("excel mdr non prodotto",), "Il motore è terminato ma non ha prodotto l'Excel MDR. Controlla che lo Scope of Work contenga l'elenco dei documenti, poi riprova."),
+        (("429", "quota", "rate limit", "resource_exhausted", "too many requests"), "Il servizio di intelligenza artificiale ha raggiunto il limite di richieste. Attendi qualche minuto e riprova."),
+        (("timeout", "timed out", "deadline"), "Il servizio ha impiegato troppo tempo a rispondere. Riprova tra poco."),
+        (("encrypted", "password", "pdfsyntax", "pdf read", "cannot read pdf", "invalid pdf", "no /root"), "Uno dei file PDF non è leggibile (protetto da password o danneggiato). Controlla i file caricati e riprova."),
+        (("api key", "api_key", "unauthorized", "401", "403", "permission"), "Il motore non è riuscito ad accedere a uno dei servizi esterni. Segnalalo a Xeel: riprovare non basta."),
+        (("memory", "oom", "killed"), "Il motore ha esaurito la memoria elaborando i file. Prova con meno file o file più piccoli."),
+    ]
+    for keys, msg in rules:
+        if any(k in text for k in keys):
+            return msg
+    return "La generazione si è interrotta per un errore non previsto. Riprova; se si ripete, scarica il log e invialo a Xeel."
+
+
 def _age_hours(value: Optional[str]) -> float:
     if not value:
         return 0.0
@@ -395,6 +413,7 @@ class GeneratorService:
             "start_label": _fmt_date(run.get("project_start_date")) if run.get("project_start_date") else "",
             "created_by": run.get("created_by"),
             "error": run.get("error"),
+            "error_hint": _explain_failure(run) if state == "failed" else None,
             "sow_files": run.get("sow_files") or [],
             "has_mdr": bool(outputs.get("mdr")),
             "summary": _public_summary(run.get("summary")),

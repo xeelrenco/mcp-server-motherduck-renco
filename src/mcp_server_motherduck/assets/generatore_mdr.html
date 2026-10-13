@@ -45,6 +45,9 @@
   .st.succeeded { background:var(--ok-bg); color:var(--ok); } .st.failed { background:var(--err-bg); color:var(--err); }
   .st.cancelled { background:var(--soft); color:var(--muted); }
   .muted { color:var(--muted); font-size:12px; }
+  #toasts { position:fixed; top:8px; left:12px; right:12px; z-index:50; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+  .toast { pointer-events:auto; display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:8px; font-size:13px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,.18); border:1px solid var(--line); background:var(--ok-bg); color:var(--ok); cursor:pointer; }
+  .toast.bad { background:var(--err-bg); color:var(--err); } .toast span { flex:1; } .toast i { font-style:normal; opacity:.7; }
   .bar { height:8px; background:var(--soft); border-radius:99px; overflow:hidden; margin:8px 0 4px; border:1px solid var(--line); }
   .bar > i { display:block; height:100%; background:var(--accent); transition:width .4s; }
   .msg { padding:8px 10px; border-radius:6px; margin:10px 0; font-size:13px; background:var(--wait-bg); color:var(--wait); }
@@ -69,6 +72,7 @@
 </head>
 <body>
 <h1>Generatore MDR</h1>
+<div id="toasts"></div>
 <div id="cfg"></div>
 <div class="tabs">
   <button class="tab on" data-t="new">Nuova generazione</button>
@@ -222,6 +226,22 @@ window.__mcpApps={App:OO};})();</script>
     return app.callServerTool({ name: name, arguments: args || {} }).then(function (res) {
       if (res && res.isError) throw new Error(errText(res));
       return parse(res) || {};
+    });
+  }
+  var prevActive = {};
+  function toast(r) {
+    var ok = r.state === "succeeded", bad = r.state === "failed";
+    var box = $("toasts"), n = el("div", "toast" + (bad ? " bad" : ""));
+    n.appendChild(el("span", "", (ok ? "Generazione completata" : bad ? "Generazione in errore" : "Generazione annullata") + " · Progetto " + r.project_code));
+    n.appendChild(el("i", "", "Apri"));
+    var close = function () { if (n.parentNode) n.parentNode.removeChild(n); };
+    n.onclick = function () { close(); curJob = r.job_id; links = null; show("det"); };
+    box.appendChild(n); if (!bad) setTimeout(close, 12000);
+  }
+  function track(list) { // avvisa quando una generazione che era in corso termina
+    (list || []).forEach(function (r) {
+      if (prevActive[r.job_id] && !r.active) toast(r);
+      prevActive[r.job_id] = !!r.active;
     });
   }
   function say(box, text, kind) { box.textContent = ""; if (text) { var m = el("div", "msg " + (kind || ""), text); box.appendChild(m); } }
@@ -426,7 +446,7 @@ window.__mcpApps={App:OO};})();</script>
     refreshing = true; $("refresh").disabled = true; $("refresh").textContent = "Aggiorno…";
     var t0 = Date.now();
     call("mdr_elenco", { limit: 50 }).then(function (d) {
-      cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: Date.now() - t0, server: d.ms };
+      track(d.runs); cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: Date.now() - t0, server: d.ms };
     }).catch(function (e) {
       if (!cache) say($("list"), String(e.message || e), "err"); else $("meta").textContent = "Aggiornamento non riuscito: " + String(e.message || e);
     }).then(function () {
@@ -511,7 +531,8 @@ window.__mcpApps={App:OO};})();</script>
       else d.appendChild(dl(k.replace(/_/g, " "), String(v)));
     });
     box.appendChild(d);
-    if (r.error) box.appendChild(el("div", "msg err", r.error));
+    if (r.error_hint) { var eh = el("div", "msg err"); eh.appendChild(el("b", "", r.error_hint)); if (r.error) eh.appendChild(el("div", "muted", "Dettaglio tecnico: " + r.error)); box.appendChild(eh); }
+    else if (r.error) box.appendChild(el("div", "msg err", r.error));
     var key = curJob + "|" + (r.has_mdr ? 1 : 0) + "|" + (r.active ? 1 : 0);
     var need = !links || linksJob !== curJob || linksKey !== key || Date.now() - linksAt > 9 * 60 * 1000;
     if (loading || need) { // scheda non pronta: niente pulsanti, solo segnaposto e indicatore
@@ -535,17 +556,18 @@ window.__mcpApps={App:OO};})();</script>
     if (!r.active) fl.appendChild(makeLink("Log", "log", "", "sec"));
     r.sow_files.forEach(function (n) { fl.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
     if (!r.active && r.sow_files.length) {
-      var br = el("button", "sec", "Rilancia con gli stessi file");
+      var lbl = r.state === "failed" ? "Riprova con gli stessi file" : "Rilancia con gli stessi file";
+      var br = el("button", r.state === "failed" ? "" : "sec", lbl);
       br.onclick = function () {
         if (!br.dataset.sure) { // secondo clic per confermare: ogni generazione consuma crediti dei modelli
           br.dataset.sure = "1"; br.textContent = "Conferma: avvia una nuova generazione"; br.className = "danger";
-          setTimeout(function () { if (br.isConnected) { delete br.dataset.sure; br.textContent = "Rilancia con gli stessi file"; br.className = "sec"; } }, 6000);
+          setTimeout(function () { if (br.isConnected) { delete br.dataset.sure; br.textContent = lbl; br.className = r.state === "failed" ? "" : "sec"; } }, 6000);
           return;
         }
         br.disabled = true; br.textContent = "Avvio…";
         call("mdr_rilancia", { job_id: curJob }).then(function (n) {
           runs[n.job_id] = n; if (cache) { cache.runs.unshift(n); cache.at = 0; } curJob = n.job_id; links = null; show("det");
-        }).catch(function (e) { br.disabled = false; br.textContent = "Rilancia con gli stessi file"; br.className = "sec"; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
+        }).catch(function (e) { br.disabled = false; br.textContent = lbl; br.className = r.state === "failed" ? "" : "sec"; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
       }; ops.appendChild(br);
     }
     if (!r.active) {
@@ -572,7 +594,7 @@ window.__mcpApps={App:OO};})();</script>
     if (!again) { if (runs[job]) drawDet(runs[job], true); else skelDet($("det")); } // subito i dati già noti, poi l'aggiornamento
     call("mdr_dettaglio", { job_id: job }).then(function (r) {
       if (job !== curJob || $("v-det").classList.contains("hide")) return;
-      runs[r.job_id] = r;
+      runs[r.job_id] = r; track([r]);
       if (cache) { var ix = cache.runs.findIndex(function (x) { return x.job_id === r.job_id; }); if (ix >= 0) cache.runs[ix] = r; tabCount(); }
       drawDet(r);
       if (r.active) timer = setTimeout(function () { pollDet(true); }, 5000);
@@ -583,7 +605,7 @@ window.__mcpApps={App:OO};})();</script>
     var d = parse(p);
     if (d && d.errore) { say($("cfg"), d.errore, "err"); cfgError = true; renderFiles(); }
     if (d && d.max_file_mb) { MAXF = d.max_file_mb; MAXT = d.max_upload_mb || MAXT; }
-    if (d && d.runs && d.runs.length) { cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: 0, server: null }; show("list"); if (d.altri) refresh(); }
+    if (d && d.runs && d.runs.length) { track(d.runs); cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: 0, server: null }; show("list"); if (d.altri) refresh(); }
   };
   app.connect && app.connect();
   renderFiles();
