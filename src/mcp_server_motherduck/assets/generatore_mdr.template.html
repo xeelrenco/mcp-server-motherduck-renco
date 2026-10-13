@@ -27,6 +27,9 @@
   a.btn { display:inline-block; text-decoration:none; background:var(--accent); color:#fff; border-radius:6px; padding:7px 14px; font-size:13px; font-weight:600; }
   a.btn.sec { background:var(--soft); color:var(--text); border:1px solid var(--line); }
   a.btn.off { opacity:.5; pointer-events:none; }
+  .prep { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin:6px 0 4px; }
+  .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:rot .8s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
   button.sec { background:var(--soft); color:var(--text); border:1px solid var(--line); }
   button.danger { background:var(--err-bg); color:var(--err); border:1px solid var(--err); }
   button[disabled] { opacity:.5; cursor:default; }
@@ -334,7 +337,7 @@
 
   // ---- dettaglio
   function dl(label, value) { var f = document.createDocumentFragment(); f.appendChild(el("dt", "", label)); f.appendChild(el("dd", "", value)); f.lastChild.style.margin = 0; return f; }
-  var links = null, linksAt = 0, linksJob = null;
+  var links = null, linksAt = 0, linksJob = null, linksKey = "";
   function fetchLinks(job) {
     return call("mdr_links", { job_id: job }).then(function (l) { if (job === curJob) { links = l; linksAt = Date.now(); } return l; });
   }
@@ -373,7 +376,7 @@
       if (l) { a.href = l.url; a.classList.remove("off"); }
     });
   }
-  function drawDet(r) {
+  function drawDet(r, loading) {
     var box = $("det"); box.textContent = "";
     var row = el("div", "row"); row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
     if (r.active || r.state === "succeeded") {
@@ -390,6 +393,24 @@
     });
     box.appendChild(d);
     if (r.error) box.appendChild(el("div", "msg err", r.error));
+    var key = curJob + "|" + (r.has_mdr ? 1 : 0) + "|" + (r.active ? 1 : 0);
+    var need = !links || linksJob !== curJob || linksKey !== key || Date.now() - linksAt > 9 * 60 * 1000;
+    if (loading || need) { // scheda non pronta: niente pulsanti, solo segnaposto e indicatore
+      var pr = el("div", "prep"); pr.appendChild(el("span", "spin")); pr.appendChild(el("span", "", loading ? "Carico la scheda…" : "Preparo i pulsanti…")); box.appendChild(pr);
+      var sk = el("div", "actions"); sk.appendChild(skel("110px", "30px")); sk.appendChild(skel("70px", "30px")); sk.appendChild(skel("150px", "30px")); box.appendChild(sk);
+      var dm = el("div"); dm.id = "detmsg"; box.appendChild(dm);
+      if (!loading) {
+        linksJob = curJob; linksKey = key;
+        var jb = curJob;
+        fetchLinks(jb).then(function () { if (jb === curJob && !$("v-det").classList.contains("hide")) drawDet(runs[jb] || r); })
+          .catch(function (e) {
+            linksKey = ""; if (jb !== curJob) return;
+            var m2 = $("detmsg"); m2.textContent = ""; var er = el("div", "msg err", String(e.message || e) + " ");
+            var rb = el("button", "sec", "Riprova"); rb.onclick = function () { drawDet(runs[jb] || r); }; er.appendChild(rb); m2.appendChild(er);
+          });
+      }
+      return;
+    }
     var a = el("div", "actions");
     if (r.has_mdr) a.appendChild(makeLink("Scarica MDR", "mdr", "", ""));
     if (!r.active) a.appendChild(makeLink("Log", "log", "", "sec"));
@@ -422,19 +443,17 @@
     }
     box.appendChild(a);
     var m = el("div"); m.id = "detmsg"; box.appendChild(m);
-    var need = !links || linksJob !== curJob || (r.has_mdr && !links.mdr) || (!r.active && !links.log);
-    if (!need) armLinks();
-    else { linksJob = curJob; fetchLinks(curJob).then(armLinks).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); }); }
+    armLinks();
   }
-  function pollDet() {
+  function pollDet(again) {
     clearTimeout(timer);
     var job = curJob;
-    if (runs[job]) drawDet(runs[job]); else skelDet($("det")); // subito i dati già noti, poi l'aggiornamento
+    if (!again) { if (runs[job]) drawDet(runs[job], true); else skelDet($("det")); } // subito i dati già noti, poi l'aggiornamento
     call("mdr_dettaglio", { job_id: job }).then(function (r) {
       if (job !== curJob || $("v-det").classList.contains("hide")) return;
       runs[r.job_id] = r;
       drawDet(r);
-      if (r.active) timer = setTimeout(pollDet, 5000);
+      if (r.active) timer = setTimeout(function () { pollDet(true); }, 5000);
     }).catch(function (e) { say($("det"), String(e.message || e), "err"); });
   }
 
