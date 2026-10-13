@@ -269,7 +269,15 @@ def main(
         logger.info(
             f"🦆 Connect to MotherDuck MCP Server at \033[1m\033[36mhttp://{host}:{port}/mcp\033[0m"
         )
-        mcp.run(transport="http", host=host, port=port, stateless_http=stateless_http)
+        from .auth import http_middleware
+
+        mcp.run(
+            transport="http",
+            host=host,
+            port=port,
+            stateless_http=stateless_http,
+            middleware=http_middleware(),
+        )
     else:
         logger.info("MCP server initialized in \033[32mstdio\033[0m mode")
         logger.info("Waiting for client connection")
