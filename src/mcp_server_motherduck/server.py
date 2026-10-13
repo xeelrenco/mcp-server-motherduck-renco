@@ -16,7 +16,6 @@ from .configs import SERVER_VERSION
 from .database import DatabaseClient
 from .instructions import get_instructions
 from .mdr_generator import register_mdr_generator
-from .mdr_panel import register_mdr_panel
 from .tools.execute_query import execute_query as execute_query_fn
 from .tools.list_columns import list_columns as list_columns_fn
 from .tools.list_databases import list_databases as list_databases_fn
@@ -267,9 +266,6 @@ def create_mcp_server(
     def renco_assistant_context() -> str:
         """Full context for Renco MDR, RACI, reconciliation, recovery, and consolidated outcomes."""
         return PROMPT_TEXTS["renco-assistant-context"]
-
-    # Pannello MDR di prova (MCP Apps), attivo solo con MDR_PANEL_ENABLED=true
-    register_mdr_panel(mcp, db_client)
 
     # Generatore MDR in chat (MCP Apps), attivo solo con MDR_GENERATOR_ENABLED=true
     register_mdr_generator(mcp)
