@@ -712,10 +712,11 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
         name="apri_generatore_mdr", title="Apri il generatore MDR",
         description=(
             "Mostra all'utente il pannello del Generatore MDR: da lì carica i PDF di Scope of Work, "
-            "avvia una generazione, vede l'avanzamento e scarica l'MDR e il report qualità. "
-            "Usalo quando l'utente vuole generare un MDR, caricare uno Scope of Work, "
-            "vedere o riprendere le generazioni. Dopo la chiamata di' solo che il pannello è aperto: "
-            "è il pannello a guidare l'utente."
+            "avvia una generazione, vede l'avanzamento e scarica l'MDR e il log. "
+            "Usalo SEMPRE quando l'utente vuole generare un MDR, caricare uno Scope of Work, "
+            "oppure vedere, controllare o riprendere le generazioni (es. 'a che punto sono le mie generazioni', "
+            "'stato delle generazioni', 'mostrami le generazioni', 'scarica l'MDR generato'). "
+            "Dopo la chiamata di' solo che il pannello è aperto: è il pannello a guidare l'utente."
         ),
         annotations=read_hints,
         meta={"ui": {"resourceUri": GEN_URI, "visibility": ["model", "app"]}},
@@ -733,7 +734,9 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
 
     @mcp.tool(
         name="elenco_generazioni_mdr", title="Elenco generazioni MDR",
-        description=("Elenca le generazioni MDR più recenti con stato e avanzamento. "
+        description=("Elenco TESTUALE delle generazioni MDR (stato e avanzamento), solo per rispondere a una domanda "
+                     "precisa in chat, ad esempio quante sono in corso. Se l'utente vuole vedere, controllare o gestire "
+                     "le generazioni, usa invece apri_generatore_mdr. "
                      "Filtri facoltativi: progetto (parte del codice) e stato (active, succeeded, failed, cancelled)."),
         annotations=read_hints,
     )
