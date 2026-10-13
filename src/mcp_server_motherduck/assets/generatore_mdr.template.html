@@ -18,6 +18,8 @@
   .tab { background:none; color:var(--muted); border:0; border-bottom:2px solid transparent; border-radius:0; padding:6px 12px; font-weight:600; }
   .tab.on { color:var(--accent); border-bottom-color:var(--accent); }
   label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin:10px 0 3px; }
+  .filters input[type=text] { max-width:220px; }
+  select { padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit; }
   input[type=text], input[type=date] { width:100%; max-width:320px; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit; }
   .drop { border:2px dashed var(--line); border-radius:8px; padding:14px; text-align:center; color:var(--muted); cursor:pointer; background:var(--soft); }
   .drop.over { border-color:var(--accent); }
@@ -48,6 +50,10 @@
   .sk { background:linear-gradient(90deg,var(--soft) 25%,var(--line) 50%,var(--soft) 75%); background-size:200% 100%; animation:sk 1.2s linear infinite; border-radius:6px; }
   @keyframes sk { from { background-position:200% 0; } to { background-position:-200% 0; } }
   @media (prefers-reduced-motion: reduce) { .sk { animation:none; } }
+  .card .chk { margin-right:2px; width:16px; height:16px; accent-color:var(--accent); }
+  .card.sel { border-color:var(--accent); background:var(--soft); }
+  .bar2 { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 10px; }
+  .bar2 .sp { flex:1; }
   .hide { display:none; }
   dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:8px 0; font-size:13px; } dt { color:var(--muted); }
 </style>
@@ -72,7 +78,21 @@
 </section>
 
 <section id="v-list" class="hide">
-  <div class="actions"><button class="sec" id="refresh">Aggiorna</button></div>
+  <div class="bar2">
+    <button class="sec" id="refresh">Aggiorna</button>
+    <button class="sec" id="selmode">Seleziona</button>
+    <span class="sp"></span>
+    <button class="sec hide" id="selall">Seleziona tutte</button>
+    <button class="danger hide" id="delsel" disabled>Elimina</button>
+  </div>
+  <div class="bar2 filters">
+    <input type="text" id="fq" maxlength="40" placeholder="Cerca codice progetto" aria-label="Cerca codice progetto" autocomplete="off">
+    <select id="fs" aria-label="Filtra per stato">
+      <option value="">Tutti gli stati</option><option value="active">In corso</option><option value="succeeded">Completati</option>
+      <option value="failed">In errore</option><option value="cancelled">Annullati</option>
+    </select>
+    <button class="sec hide" id="fclear">Azzera filtri</button>
+  </div>
   <div id="list"></div>
 </section>
 
@@ -115,6 +135,7 @@
     ["new", "list", "det"].forEach(function (t) { $("v-" + t).classList.toggle("hide", t !== tab); });
     document.querySelectorAll(".tab").forEach(function (b) { b.classList.toggle("on", b.dataset.t === (tab === "det" ? "list" : tab)); });
     clearTimeout(timer);
+    if (tab !== "list") { selecting = false; picked = {}; }
     if (tab === "list" && !(seeded && !seedUsed)) loadList();
     if (tab === "list") seedUsed = true;
     if (tab === "det") pollDet();
@@ -199,24 +220,83 @@
     for (var i = 0; i < 4; i++) { var l = skel(60 + i * 8 + "%", "12px"); l.style.marginBottom = "8px"; box.appendChild(l); }
     var act = el("div", "actions"); act.appendChild(skel("110px", "30px")); act.appendChild(skel("150px", "30px")); act.appendChild(skel("60px", "30px")); box.appendChild(act);
   }
-  var runs = {};
+  var runs = {}, currentRuns = [], currentMore = false, fq = "", fs = "", flimit = 10, loadTok = 0;
+  var selecting = false, picked = {};
+  function pickedIds() { return Object.keys(picked).filter(function (k) { return picked[k]; }); }
+  function updateSel() {
+    var n = pickedIds().length, btn = $("delsel");
+    btn.disabled = n === 0; btn.textContent = n ? "Elimina (" + n + ")" : "Elimina";
+    delete btn.dataset.sure; btn.className = "danger" + (selecting ? "" : " hide");
+    $("selmode").textContent = selecting ? "Fine selezione" : "Seleziona";
+    $("selall").classList.toggle("hide", !selecting);
+    btn.classList.toggle("hide", !selecting);
+    document.querySelectorAll("#list .card").forEach(function (c) {
+      var on = !!picked[c.dataset.job]; c.classList.toggle("sel", on);
+      var k = c.querySelector(".chk"); if (k) k.checked = on;
+    });
+  }
   function renderList(d) {
+    currentRuns = d.runs; currentMore = d.altri;
     var box = $("list"); box.textContent = "";
-    if (!d.runs.length) { box.appendChild(el("p", "muted", "Nessuna generazione.")); return; }
+    if (!d.runs.length) { box.appendChild(el("p", "muted", fq || fs ? "Nessuna generazione corrisponde ai filtri." : "Nessuna generazione.")); updateSel(); return; }
     d.runs.forEach(function (r) {
       runs[r.job_id] = r;
-      var c = el("div", "card click"), row = el("div", "row");
+      var c = el("div", "card click"), row = el("div", "row"); c.dataset.job = r.job_id;
+      if (selecting) {
+        var k = el("input", "chk"); k.type = "checkbox"; k.disabled = r.active; k.title = r.active ? "In corso: annullala prima" : "";
+        k.onclick = function (e) { e.stopPropagation(); picked[r.job_id] = k.checked; updateSel(); };
+        row.appendChild(k);
+      }
       row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
       c.appendChild(el("div", "muted", r.created_label + (r.active ? " · " + (r.step_label || "") : "")));
-      c.onclick = function () { curJob = r.job_id; show("det"); };
+      c.onclick = function () {
+        if (selecting) { if (!r.active) { picked[r.job_id] = !picked[r.job_id]; updateSel(); } return; }
+        curJob = r.job_id; show("det");
+      };
       box.appendChild(c);
     });
-    if (d.altri) box.appendChild(el("p", "muted", "Sono mostrate le ultime 10 generazioni."));
+    if (d.altri) {
+      var more = el("button", "sec", flimit >= 50 ? "Ce ne sono altre: affina i filtri" : "Mostra altre"); more.disabled = flimit >= 50;
+      more.onclick = function () { flimit = Math.min(flimit + 10, 50); loadList(); };
+      box.appendChild(more);
+    }
+    updateSel();
   }
+  $("selmode").onclick = function () { selecting = !selecting; picked = {}; renderList({ runs: currentRuns, altri: currentMore }); };
+  $("selall").onclick = function () { currentRuns.forEach(function (r) { if (!r.active) picked[r.job_id] = true; }); updateSel(); };
+  function confirmDelete(btn, ids, label, done) {
+    if (!btn.dataset.sure) {
+      btn.dataset.sure = "1"; btn.textContent = "Conferma: elimina anche i file dal bucket";
+      setTimeout(function () { if (btn.isConnected && btn.dataset.sure) { delete btn.dataset.sure; btn.textContent = label(); } }, 6000);
+      return;
+    }
+    btn.disabled = true; btn.textContent = "Elimino…";
+    call("mdr_elimina", { job_ids: ids }).then(function (res) {
+      ids.forEach(function (id) { if (res.eliminati.indexOf(id) >= 0) { delete runs[id]; delete picked[id]; } });
+      done(res);
+    }).catch(function (e) { btn.disabled = false; delete btn.dataset.sure; btn.textContent = label(); say($("detmsg") || $("list"), String(e.message || e), "err"); });
+  }
+  $("delsel").onclick = function () {
+    confirmDelete(this, pickedIds(), function () { var n = pickedIds().length; return n ? "Elimina (" + n + ")" : "Elimina"; }, function (res) {
+      selecting = false; picked = {}; loadList();
+      if (res.saltati.length) setTimeout(function () { say($("list"), res.saltati.length + " generazioni non eliminate (in corso).", ""); }, 0);
+    });
+  };
   function loadList() {
     var box = $("list"); skelList(box);
-    call("mdr_elenco", { limit: 10 }).then(renderList).catch(function (e) { say(box, String(e.message || e), "err"); });
+    var tok = ++loadTok;
+    call("mdr_elenco", { q: fq, stato: fs, limit: flimit }).then(function (d) { if (tok !== loadTok) return; currentRuns = d.runs; currentMore = d.altri; renderList(d); }).catch(function (e) { say(box, String(e.message || e), "err"); });
   }
+  var ftimer = null;
+  function filtersChanged() {
+    fq = $("fq").value.trim(); fs = $("fs").value; flimit = 10; picked = {};
+    $("fclear").classList.toggle("hide", !(fq || fs));
+    loadList();
+  }
+  $("fq").oninput = function () { clearTimeout(ftimer); ftimer = setTimeout(filtersChanged, 450); };
+  $("fq").onkeydown = function (e) { if (e.key === "Enter") { clearTimeout(ftimer); filtersChanged(); } };
+  $("fs").onchange = filtersChanged;
+  $("fclear").onclick = function () { $("fq").value = ""; $("fs").value = ""; filtersChanged(); };
   $("refresh").onclick = loadList;
   $("back").onclick = function () { show("list"); };
 
@@ -282,6 +362,26 @@
     if (r.has_mdr) a.appendChild(makeLink("Scarica MDR", "mdr", "", ""));
     if (!r.active) a.appendChild(makeLink("Log", "log", "", "sec"));
     r.sow_files.forEach(function (n) { a.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
+    if (!r.active && r.sow_files.length) {
+      var br = el("button", "sec", "Rilancia con gli stessi file");
+      br.onclick = function () {
+        if (!br.dataset.sure) { // secondo clic per confermare: ogni generazione consuma crediti dei modelli
+          br.dataset.sure = "1"; br.textContent = "Conferma: avvia una nuova generazione"; br.className = "danger";
+          setTimeout(function () { if (br.isConnected) { delete br.dataset.sure; br.textContent = "Rilancia con gli stessi file"; br.className = "sec"; } }, 6000);
+          return;
+        }
+        br.disabled = true; br.textContent = "Avvio…";
+        call("mdr_rilancia", { job_id: curJob }).then(function (n) {
+          runs[n.job_id] = n; curJob = n.job_id; links = null; show("det");
+        }).catch(function (e) { br.disabled = false; br.textContent = "Rilancia con gli stessi file"; br.className = "sec"; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
+      }; a.appendChild(br);
+    }
+    if (!r.active) {
+      var bd = el("button", "danger", "Elimina");
+      bd.onclick = function () {
+        confirmDelete(bd, [r.job_id], function () { return "Elimina"; }, function () { seedUsed = true; show("list"); });
+      }; a.appendChild(bd);
+    }
     if (r.active) {
       var bc = el("button", "danger", "Annulla"); bc.onclick = function () {
         bc.disabled = true;

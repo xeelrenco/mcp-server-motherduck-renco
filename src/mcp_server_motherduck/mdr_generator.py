@@ -147,6 +147,9 @@ class GcsBackend:
         if blob.exists():
             blob.delete()
 
+    def copy(self, src: str, dst: str) -> None:
+        self.bucket.copy_blob(self.bucket.blob(src), self.bucket, dst)
+
     def signed_put_url(self, key: str, content_type: str, minutes: int = 30) -> str:
         return self.bucket.blob(key).generate_signed_url(
             version="v4", expiration=dt.timedelta(minutes=minutes), method="PUT",
@@ -255,6 +258,11 @@ class LocalBackend:
 
     def delete_key(self, key: str) -> None:
         self._p(key).unlink(missing_ok=True)
+
+    def copy(self, src: str, dst: str) -> None:
+        d = self._p(dst)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(self._p(src), d)
 
     def signed_put_url(self, key: str, content_type: str, minutes: int = 30) -> str:
         return f"{self.base_url}/put/{key}"
@@ -516,28 +524,70 @@ class GeneratorService:
         if error:
             self.b.delete_prefix(f"jobs/{job_id}/")
             raise ValueError(error)
+        view = self._launch(job_id, pending["project_code"], pending.get("start_date") or "", names,
+                            user or pending.get("user", ""))
+        self.b.delete_key(f"jobs/{job_id}/pending.json")
+        return view
+
+    def _launch(self, job_id: str, project_code: str, start_date: str, names: List[str], user: str,
+                retry_of: Optional[str] = None) -> Dict:
+        """Scrive lo stato iniziale e avvia il motore (i SoW sono già nel bucket)."""
         status = {
-            "job_id": job_id, "project_code": pending["project_code"],
-            "project_start_date": pending.get("start_date") or None,
+            "job_id": job_id, "project_code": project_code,
+            "project_start_date": start_date or None,
             "state": "queued", "step": 0, "total_steps": TOTAL_STEPS, "step_label": "In coda",
             "created_at": _now_iso(), "updated_at": _now_iso(),
-            "created_by": user or pending.get("user", ""), "sow_files": sorted(names),
+            "created_by": user, "sow_files": sorted(names),
         }
+        if retry_of:
+            status["retry_of"] = retry_of
         self.b.write_json(status_key(job_id), status)
         try:
-            execution = self.b.launch(job_id, pending["project_code"], pending.get("start_date") or "")
+            execution = self.b.launch(job_id, project_code, start_date)
         except Exception as exc:  # noqa: BLE001
             logger.exception("avvio del job non riuscito")
             status.update(state="failed", error=f"Avvio non riuscito: {exc}", finished_at=_now_iso())
             self.b.write_json(status_key(job_id), status)
-            self.b.delete_key(f"jobs/{job_id}/pending.json")
             return self.view(status)
         # Il motore potrebbe aver già scritto lo stato: si aggiunge solo l'esecuzione.
         current = self.b.read_json(status_key(job_id)) or status
         current["execution"] = execution
         self.b.write_json(status_key(job_id), current)
-        self.b.delete_key(f"jobs/{job_id}/pending.json")
         return self.view(current)
+
+    def delete(self, job_ids: List[str]) -> Dict:
+        """Elimina dal bucket le generazioni indicate (PDF, risultati, log). Quelle in corso si saltano.
+        Lo storico di audit del progetto (history/) resta: serve al confronto di stabilità del run successivo."""
+        deleted: List[str] = []
+        skipped: List[Dict] = []
+        for job_id in dict.fromkeys(job_ids or []):
+            if not valid_job_id(job_id):
+                skipped.append({"job_id": job_id, "motivo": "non valida"})
+                continue
+            run = self.b.read_json(status_key(job_id))
+            if run and self._refresh(run).get("state") in ACTIVE_STATES:
+                skipped.append({"job_id": job_id, "motivo": "in corso: annullala prima"})
+                continue
+            self.b.delete_prefix(f"jobs/{job_id}/")
+            self._final.pop(job_id, None)
+            deleted.append(job_id)
+        return {"eliminati": deleted, "saltati": skipped}
+
+    def retry(self, job_id: str, user: str = "") -> Dict:
+        """Nuova generazione con gli stessi SoW e parametri (quella originale resta com'è)."""
+        run = self.get(job_id)
+        if run.get("state") in ACTIVE_STATES:
+            raise ValueError("La generazione è ancora in corso.")
+        if self.max_parallel and self.active_count() >= self.max_parallel:
+            raise ValueError("Ci sono già generazioni in corso: attendi che finiscano (o annullale) e riprova.")
+        names = [n for n in (run.get("sow_files") or []) if self.b.exists(f"jobs/{job_id}/input/{n}")]
+        if not names:
+            raise ValueError("I file SoW di questa generazione non sono più disponibili.")
+        new_id = new_job_id(run.get("project_code", ""))
+        for name in names:
+            self.b.copy(f"jobs/{job_id}/input/{name}", f"jobs/{new_id}/input/{name}")
+        return self._launch(new_id, run.get("project_code", ""), run.get("project_start_date") or "",
+                            names, user, retry_of=job_id)
 
     def cancel(self, job_id: str, user: str = "") -> Dict:
         run = self.get(job_id)
@@ -682,7 +732,8 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
     @mcp.tool(name="mdr_elenco", title="Elenco generazioni", description="Usato solo dal pannello.",
               annotations=read_hints, meta=app_only)
     async def mdr_elenco(q: str = "", stato: str = "", limit: int = 10) -> dict:
-        runs, more = await run(svc.list_runs, max(1, min(int(limit), 50)), stato, q)
+        runs, more = await run(svc.list_runs, max(1, min(int(limit), 50)),
+                                 stato if stato in ("", "active", "succeeded", "failed", "cancelled") else "", (q or "")[:40])
         return {"runs": runs, "altri": more}
 
     @mcp.tool(name="mdr_dettaglio", title="Dettaglio generazione", description="Usato solo dal pannello.",
@@ -705,6 +756,16 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
               annotations=write_hints, meta=app_only)
     async def mdr_annulla(job_id: str) -> dict:
         return await run(svc.cancel, job_id, "gemini")
+
+    @mcp.tool(name="mdr_elimina", title="Elimina generazioni", description="Usato solo dal pannello.",
+              annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False}, meta=app_only)
+    async def mdr_elimina(job_ids: List[str]) -> dict:
+        return await run(svc.delete, [str(j) for j in (job_ids or [])][:50])
+
+    @mcp.tool(name="mdr_rilancia", title="Rilancia generazione", description="Usato solo dal pannello.",
+              annotations=write_hints, meta=app_only)
+    async def mdr_rilancia(job_id: str) -> dict:
+        return await run(svc.retry, job_id, "gemini")
 
     @mcp.tool(name="mdr_link", title="Link di download", description="Usato solo dal pannello.",
               annotations=read_hints, meta=app_only)
