@@ -293,15 +293,12 @@
     if (fs === "active") return !!r.active;
     return !fs || r.state === fs;
   }
-  function fmtSec(ms) { return (ms / 1000).toFixed(1).replace(".", ",") + " s"; }
   function drawList() {
     if (!cache) return;
     var all = cache.runs.filter(matches), shown = all.slice(0, flimit);
     renderList({ runs: shown, altri: all.length > shown.length });
     var t = new Date(cache.at), hh = ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
-    $("meta").textContent = (refreshing ? "Aggiorno… · " : "") + "Aggiornato alle " + hh +
-      (cache.total ? " · risposta in " + fmtSec(cache.total) + (cache.server != null ? " (server " + fmtSec(cache.server) + ")" : "") : "") +
-      (cache.complete ? "" : " · mostrate le ultime 50");
+    $("meta").textContent = (refreshing ? "Aggiorno… · " : "") + "Aggiornato alle " + hh;
   }
   function refresh() {
     if (refreshing) return;
