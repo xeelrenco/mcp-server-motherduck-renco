@@ -4,7 +4,7 @@ Pannello interattivo (MCP Apps) con cui l'utente carica gli Scope of Work, avvia
 ne segue l'avanzamento e scarica l'MDR. Il server comanda il motore di generazione su Google Cloud:
   - bucket Cloud Storage: PDF caricati direttamente dal browser (link firmati), stato e risultati
   - Cloud Run Job: il generatore vero e proprio
-Attivo solo se MDR_GENERATOR_ENABLED è "true". Variabili d'ambiente:
+Il pannello compare sempre; se mancano le variabili d'ambiente sotto mostra il motivo e non genera:
   MDR_GCP_KEY_JSON   contenuto della chiave dell'account di servizio "mdr-gemini" (segreto)
   MDR_GCP_PROJECT    progetto Google Cloud (es. mdr-ai)
   MDR_GCP_REGION     regione del job (es. europe-west1)
@@ -64,10 +64,6 @@ JOB_ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[A-Za-z0-9_\-]{1,40}-[0-9a-f]{4}$")
 SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._\- ]+")
 MB = 1024 * 1024
 LINK_MINUTES = 15
-
-
-def generator_enabled() -> bool:
-    return os.environ.get("MDR_GENERATOR_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 def _now_iso() -> str:
@@ -655,11 +651,23 @@ def _inject_resource_meta(mcp: FastMCP) -> None:
     handlers[mcp_types.ReadResourceRequest] = handler
 
 
+class _Unavailable:
+    """Al posto del motore quando manca la configurazione: ogni operazione spiega perché non è disponibile."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+    def __getattr__(self, name):
+        def fail(*args, **kwargs):
+            raise ValueError(self.reason)
+        return fail
+
+
 def _backend_from_env():
-    missing = [n for n in ("MDR_GCP_KEY_JSON", "MDR_GCP_PROJECT", "MDR_GCP_REGION", "MDR_BUCKET", "MDR_JOB_NAME")
-               if not os.environ.get(n, "").strip()]
+    names = ("MDR_GCP_KEY_JSON", "MDR_GCP_PROJECT", "MDR_GCP_REGION", "MDR_BUCKET", "MDR_JOB_NAME")
+    missing = [n for n in names if not os.environ.get(n, "").strip()]
     if missing:
-        raise RuntimeError("variabili mancanti: " + ", ".join(missing))
+        raise RuntimeError("Il generatore non è configurato: su Render mancano le variabili " + ", ".join(missing) + ".")
     return GcsBackend(
         os.environ["MDR_GCP_KEY_JSON"], os.environ["MDR_GCP_PROJECT"].strip(), os.environ["MDR_GCP_REGION"].strip(),
         os.environ["MDR_BUCKET"].strip(), os.environ["MDR_JOB_NAME"].strip(),
@@ -668,13 +676,12 @@ def _backend_from_env():
 
 def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
     if backend is None:
-        if not generator_enabled():
-            return
         try:
             backend = _backend_from_env()
         except Exception as exc:  # noqa: BLE001
-            logger.error("Generatore MDR non attivo: %s", exc)
-            return
+            reason = str(exc) if isinstance(exc, RuntimeError) else f"Collegamento a Google Cloud non riuscito: {exc}"
+            logger.error("Generatore MDR non operativo: %s", reason)
+            backend = _Unavailable(reason)  # il pannello si apre comunque e mostra il motivo
     if not GEN_HTML.exists():
         logger.warning("Generatore MDR: file %s mancante, non registrato", GEN_HTML)
         return
@@ -714,7 +721,12 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
         meta={"ui": {"resourceUri": GEN_URI, "visibility": ["model", "app"]}},
     )
     async def apri_generatore_mdr() -> dict:
-        runs, more = await run(svc.list_runs, 10)  # l'elenco arriva col pannello: si vede subito
+        try:
+            runs, more = await run(svc.list_runs, 10)  # l'elenco arriva col pannello: si vede subito
+        except ToolError as exc:
+            return {"messaggio": "Pannello del Generatore MDR aperto, ma il generatore non è disponibile.",
+                    "errore": str(exc), "attive": 0, "runs": [], "altri": False,
+                    "max_file_mb": svc.max_file_mb, "max_upload_mb": svc.max_total_mb}
         return {"messaggio": "Pannello del Generatore MDR aperto.",
                 "attive": sum(1 for r in runs if r["active"]), "runs": runs, "altri": more,
                 "max_file_mb": svc.max_file_mb, "max_upload_mb": svc.max_total_mb}

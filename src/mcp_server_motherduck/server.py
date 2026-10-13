@@ -267,7 +267,7 @@ def create_mcp_server(
         """Full context for Renco MDR, RACI, reconciliation, recovery, and consolidated outcomes."""
         return PROMPT_TEXTS["renco-assistant-context"]
 
-    # Generatore MDR in chat (MCP Apps), attivo solo con MDR_GENERATOR_ENABLED=true
+    # Generatore MDR in chat (MCP Apps), si attiva quando sono impostate le variabili MDR_GCP_* e MDR_BUCKET / MDR_JOB_NAME
     register_mdr_generator(mcp)
 
     logger.info(f"FastMCP server created with {len(mcp._tool_manager._tools)} tools")

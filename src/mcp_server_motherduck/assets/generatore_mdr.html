@@ -60,6 +60,7 @@
 </head>
 <body>
 <h1>Generatore MDR</h1>
+<div id="cfg"></div>
 <div class="tabs">
   <button class="tab on" data-t="new">Nuova generazione</button>
   <button class="tab" data-t="list">Generazioni</button>
@@ -189,7 +190,7 @@ window.__mcpApps={App:OO};})();</script>
 <script>
 (function () {
   var MAXF = 32, MAXT = 100;
-  var files = [], busy = false, curJob = null, timer = null, seeded = false, seedUsed = false;
+  var files = [], busy = false, curJob = null, timer = null, seeded = false, seedUsed = false, cfgError = false;
   var $ = function (id) { return document.getElementById(id); };
   function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; }
   function mb(n) { return (n / 1048576).toFixed(1) + " MB"; }
@@ -233,7 +234,7 @@ window.__mcpApps={App:OO};})();</script>
       var x = el("button", "x", "×"); x.title = "Rimuovi"; x.onclick = function () { if (!busy) { files.splice(i, 1); renderFiles(); } };
       li.appendChild(x); ul.appendChild(li);
     });
-    $("go").disabled = busy || !files.length || !$("code").value.trim();
+    $("go").disabled = cfgError || busy || !files.length || !$("code").value.trim();
   }
   function addFiles(list) {
     var msgs = [];
@@ -522,6 +523,7 @@ window.__mcpApps={App:OO};})();</script>
 
   app.ontoolresult = function (p) {
     var d = parse(p);
+    if (d && d.errore) { say($("cfg"), d.errore, "err"); cfgError = true; renderFiles(); }
     if (d && d.max_file_mb) { MAXF = d.max_file_mb; MAXT = d.max_upload_mb || MAXT; }
     if (d && d.runs && d.runs.length) { cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: 0, server: null }; show("list"); if (d.altri) refresh(); }
   };
