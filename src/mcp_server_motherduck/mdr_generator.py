@@ -326,26 +326,40 @@ def _parse_iso(value: Any) -> Optional[dt.datetime]:
     return d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)
 
 
+# Passi del motore che non si mostrano (anche nelle generazioni già fatte): il 11 "Confronto con storico" non serve a leggere l'MDR.
+HIDDEN_STEPS = {11}
+VISIBLE_STEPS = [n for n in range(1, len(STEP_NAMES) + 1) if n not in HIDDEN_STEPS]
+
+
+def _shown_step(step: int) -> int:
+    """Passo da mostrare: se il motore è su un passo nascosto, per chi guarda è ancora in quello prima."""
+    while step in HIDDEN_STEPS:
+        step -= 1
+    return step
+
+
 def _timeline(run: Dict) -> List[Dict]:
-    """I 13 passi con stato (done/current/failed/stopped/todo) e secondi impiegati (None se non registrati)."""
+    """I passi visibili con stato (done/current/failed/stopped/todo) e secondi impiegati (None se non registrati)."""
     state = run.get("state", "queued")
-    step = int(run.get("step") or 0)
+    step = _shown_step(int(run.get("step") or 0))
     times = run.get("step_times") or {}
     finished = _parse_iso(run.get("finished_at"))
     now = dt.datetime.now(dt.timezone.utc)
     out = []
-    for n, label in enumerate(STEP_NAMES, 1):
+    for k, n in enumerate(VISIBLE_STEPS):
+        label = STEP_NAMES[n - 1]
         if state == "succeeded" or n < step:
             st = "done"
         elif n == step:
             st = {"failed": "failed", "cancelled": "stopped"}.get(state, "current")
         else:
             st = "todo"
-        start, end = _parse_iso(times.get(str(n))), _parse_iso(times.get(str(n + 1)))
+        nxt = VISIBLE_STEPS[k + 1] if k + 1 < len(VISIBLE_STEPS) else None
+        start, end = _parse_iso(times.get(str(n))), _parse_iso(times.get(str(nxt))) if nxt else None
         if start and not end:
             if st == "current":
                 end = now
-            elif finished and (n == step or (state == "succeeded" and n == len(STEP_NAMES))):
+            elif finished and (n == step or (state == "succeeded" and nxt is None)):
                 end = finished
         sec = round((end - start).total_seconds()) if start and end and st != "todo" and end >= start else None
         out.append({"n": n, "label": label, "st": st, "sec": sec})
@@ -461,10 +475,10 @@ class GeneratorService:
             "state": state,
             "state_label": STATE_LABELS.get(state, state),
             "active": state in ACTIVE_STATES,
-            "progress": 100 if state == "succeeded" else min(99, round(100 * step / TOTAL_STEPS)),
+            "progress": 100 if state == "succeeded" else min(99, round(100 * sum(1 for n in VISIBLE_STEPS if n <= _shown_step(step)) / len(VISIBLE_STEPS))),
             "step": step,
-            "total_steps": run.get("total_steps") or TOTAL_STEPS,
-            "step_label": run.get("step_label"),
+            "total_steps": len(VISIBLE_STEPS),
+            "step_label": STEP_NAMES[_shown_step(step) - 1] if step in HIDDEN_STEPS and state in ACTIVE_STATES else run.get("step_label"),
             "created_label": _fmt_dt(run.get("created_at")),
             "finished_label": _fmt_dt(run.get("finished_at")),
             "start_label": _fmt_date(run.get("project_start_date")) if run.get("project_start_date") else "",
