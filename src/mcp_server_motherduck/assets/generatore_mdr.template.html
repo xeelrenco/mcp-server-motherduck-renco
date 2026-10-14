@@ -38,6 +38,9 @@
   .crumb { margin:2px 0 8px; } button.lnkb { background:none; border:0; color:var(--muted); padding:4px 8px 4px 0; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:3px; cursor:pointer; } button.lnkb:hover { color:var(--accent); }
   .facts { display:flex; flex-wrap:wrap; gap:8px 28px; margin:12px 0 2px; padding:10px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
   .facts .fa span { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; } .facts .fa b { display:block; font-size:14px; margin-top:1px; font-variant-numeric:tabular-nums; }
+  .rng { position:relative; height:2px; margin:9px 4px 4px; background:var(--line); border-radius:2px; } .rng i { position:absolute; left:-4px; right:-4px; top:-3px; height:8px; background:linear-gradient(var(--c2),var(--c2)) center/100% 2px no-repeat; }
+  .rng:before, .rng:after { content:""; position:absolute; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--c2); } .rng:before { left:-4px; } .rng:after { right:-4px; }
+  .re { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:3px; text-transform:capitalize; }
   .rl { display:flex; flex-direction:column; gap:5px; max-width:340px; } .rl button { align-self:flex-start; } .rl .hint { font-size:12px; color:var(--muted); line-height:1.35; }
   .prep { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin:6px 0 4px; }
   .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:rot .8s linear infinite; }
@@ -721,6 +724,7 @@
       return bc;
   }
   var MESI3 = ["gen","feb","mar","apr","mag","giu","lug","ago","set","ott","nov","dic"];
+  function monthYear(s) { var p = s.split("-"); return MESI3[+p[1] - 1] + " " + p[0]; }
   function shortDate(s) { var p = s.split("-"); return (+p[2]) + " " + MESI3[+p[1] - 1] + " " + p[0]; }
   function isoLabel(s) { var p = s.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }
   function digestBox(r) { // riepilogo del risultato: numeri chiave, righe per disciplina, righe previste per mese
@@ -733,8 +737,10 @@
     tile(g.disciplines.length, g.disciplines.length === 1 ? "disciplina" : "discipline");
     if (g.first && g.last) {
       var days = Math.round((Date.parse(g.last) - Date.parse(g.first)) / 864e5), mo = Math.round(days / 30.44);
-      tile(days < 60 ? days + " giorni" : mo + " mesi", "durata progetto\ndal " + shortDate(g.first) + "\nal " + shortDate(g.last));
-      kpi.lastChild.lastChild.style.whiteSpace = "pre-line";
+      tile(days < 60 ? days + " giorni" : mo + " mesi", "durata progetto");
+      var kk = kpi.lastChild, rg = el("div", "rng"), re = el("div", "re");
+      rg.appendChild(el("i")); re.appendChild(el("span", "", monthYear(g.first))); re.appendChild(el("span", "", monthYear(g.last)));
+      kk.appendChild(rg); kk.appendChild(re); kk.title = "Dal " + isoLabel(g.first) + " al " + isoLabel(g.last);
     }
     box.appendChild(kpi);
     var grid = el("div", "dgrid"), c1 = el("div"), c2 = el("div"); grid.appendChild(c1); grid.appendChild(c2); box.appendChild(grid);
