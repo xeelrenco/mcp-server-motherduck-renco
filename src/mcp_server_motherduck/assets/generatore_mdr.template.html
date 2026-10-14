@@ -36,7 +36,7 @@
   .inp .fr > svg { flex:none; color:var(--muted); } .inp .fr .n { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tech { margin-top:10px; text-align:right; }
   .crumb { margin:2px 0 8px; } button.lnkb { background:none; border:0; color:var(--muted); padding:4px 8px 4px 0; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:3px; cursor:pointer; } button.lnkb:hover { color:var(--accent); }
-  .facts { display:flex; flex-wrap:wrap; gap:8px 28px; margin:12px 0 2px; padding:10px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .facts { display:flex; flex-wrap:wrap; gap:8px 28px; margin:12px 0 2px; padding:10px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); } details .facts { margin:8px 0 6px; padding:6px 0 10px; border-top:0; }
   .facts .fa span { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; } .facts .fa b { display:block; font-size:14px; margin-top:1px; font-variant-numeric:tabular-nums; }
   .rng { position:relative; height:2px; margin:9px 4px 4px; background:var(--line); border-radius:2px; } .rng i { position:absolute; left:-4px; right:-4px; top:-3px; height:8px; background:linear-gradient(var(--c2),var(--c2)) center/100% 2px no-repeat; }
   .rng:before, .rng:after { content:""; position:absolute; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--c2); } .rng:before { left:-4px; } .rng:after { right:-4px; }
@@ -882,7 +882,16 @@
   }
   var tlOpen = false;
   function fmtSec(s) { return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + pad2(s % 60) + " s"; }
-  function timeline(r) { // i passi: fatti, in corso, da fare, con il tempo impiegato (e una barretta in proporzione)
+  function buildFacts(r) { // quando, quanto è durata, da che data parte il progetto
+    var fc = el("div", "facts");
+    function fact(l, v) { var x = el("div", "fa"); x.appendChild(el("span", "", l)); x.appendChild(el("b", "", v)); fc.appendChild(x); }
+    fact("Avviata", relLabel(r.created_label));
+    if (r.finished_label) fact("Terminata", relLabel(r.finished_label));
+    if (r.summary && typeof r.summary["Durata (minuti)"] === "number") fact("Durata", Math.max(1, Math.round(r.summary["Durata (minuti)"])) + " min");
+    if (r.start_label) fact("Inizio progetto", r.start_label);
+    return fc;
+  }
+  function timeline(r, facts) { // i passi: fatti, in corso, da fare, con il tempo impiegato (e una barretta in proporzione)
     var ul = el("ul", "tl"), mx = 1;
     r.steps.forEach(function (s) { if (s.sec > mx) mx = s.sec; });
     r.steps.forEach(function (s) {
@@ -896,7 +905,7 @@
     if (r.active) return ul;
     var dt = el("details", "tld"); dt.open = tlOpen;
     dt.ontoggle = function () { tlOpen = dt.open; };
-    dt.appendChild(el("summary", "", "Passi della generazione")); dt.appendChild(ul);
+    dt.appendChild(el("summary", "", "Passi della generazione")); if (facts) dt.appendChild(facts); dt.appendChild(ul);
     return dt;
   }
   function drawDet(r, loading) {
@@ -911,14 +920,9 @@
       var bar = el("div", "bar"), i = el("i"); i.style.width = r.progress + "%"; bar.appendChild(i); box.appendChild(bar);
       box.appendChild(el("div", "muted", (r.step_label || "") + " · " + r.progress + "%"));
     }
-    if (r.steps && r.steps.length) box.appendChild(timeline(r));
-    var fc = el("div", "facts"); // quando, quanto è durata, da che data parte il progetto: una riga sola
-    function fact(l, v) { var x = el("div", "fa"); x.appendChild(el("span", "", l)); x.appendChild(el("b", "", v)); fc.appendChild(x); }
-    fact("Avviata", relLabel(r.created_label));
-    if (r.finished_label) fact("Terminata", relLabel(r.finished_label));
-    if (r.summary && typeof r.summary["Durata (minuti)"] === "number") fact("Durata", Math.max(1, Math.round(r.summary["Durata (minuti)"])) + " min");
-    if (r.start_label) fact("Inizio progetto", r.start_label);
-    box.appendChild(fc);
+    var inTl = !!(r.steps && r.steps.length && !r.active); // a generazione finita date e durata stanno dentro "Passi della generazione"
+    if (r.steps && r.steps.length) box.appendChild(timeline(r, inTl ? buildFacts(r) : null));
+    if (!inTl) box.appendChild(buildFacts(r));
     var d = el("dl");
     if (!r.digest && r.summary && typeof r.summary === "object") Object.keys(r.summary).forEach(function (k) {
       var v = r.summary[k]; if (k === "Durata (minuti)" || v === null || typeof v === "object") return;
