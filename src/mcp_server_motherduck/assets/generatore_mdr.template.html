@@ -33,7 +33,8 @@
   .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:rot .8s linear infinite; }
   @keyframes rot { to { transform:rotate(360deg); } }
   button.sec { background:var(--soft); color:var(--text); border:1px solid var(--line); }
-  button.danger { background:var(--err-bg); color:var(--err); border:1px solid var(--err); }
+  button.danger { background:#c62828; color:#fff; border:1px solid #c62828; }
+  button.danger:hover:not(:disabled) { background:#a81f1f; border-color:#a81f1f; }
   button[disabled] { opacity:.5; cursor:default; }
   .files { list-style:none; padding:0; margin:8px 0; }
   .files li { display:flex; gap:8px; align-items:center; padding:5px 8px; border:1px solid var(--line); border-radius:6px; margin-bottom:4px; font-size:13px; }
@@ -126,7 +127,7 @@
 <section id="v-list" class="hide">
   <div class="bar2">
     <button class="sec" id="refresh">Aggiorna</button>
-    <button class="sec" id="selmode">Elimina</button>
+    <button class="sec" id="selmode">Seleziona</button>
     <span class="sp"></span>
     <button class="sec hide" id="selall">Seleziona tutte</button>
     <button class="danger hide" id="delsel" disabled>Elimina</button>
@@ -137,10 +138,10 @@
       <option value="">Tutti gli stati</option><option value="active">In corso</option><option value="succeeded">Completati</option>
       <option value="failed">In errore</option><option value="cancelled">Annullati</option>
     </select>
-    <div class="cwrap"><button type="button" class="sec" id="fdbtn" aria-label="Filtra per data" title="Filtra per data"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg><span id="fdlbl">Tutte le date</span></button><div id="rcal" class="cal rng hide"></div></div>
     <select id="fo" aria-label="Ordina">
       <option value="new">Più recenti prima</option><option value="old">Meno recenti prima</option>
     </select>
+    <div class="cwrap"><button type="button" class="sec" id="fdbtn" aria-label="Filtra per data" title="Filtra per data"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg><span id="fdlbl">Tutte le date</span></button><div id="rcal" class="cal rng hide"></div></div>
     <button class="sec hide" id="fclear">Azzera filtri</button>
   </div>
   <div id="list"></div>
@@ -397,7 +398,7 @@
     var n = pickedIds().length, btn = $("delsel");
     btn.disabled = n === 0; btn.textContent = n ? "Elimina (" + n + ")" : "Elimina";
     delete btn.dataset.sure; btn.className = "danger" + (selecting ? "" : " hide");
-    $("selmode").textContent = selecting ? "Annulla" : "Elimina";
+    $("selmode").textContent = selecting ? "Annulla" : "Seleziona";
     $("selall").classList.toggle("hide", !selecting);
     btn.classList.toggle("hide", !selecting);
     document.querySelectorAll("#list .card").forEach(function (c) {
