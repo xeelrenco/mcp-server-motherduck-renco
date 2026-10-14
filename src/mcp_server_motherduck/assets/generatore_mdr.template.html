@@ -721,6 +721,7 @@
       return bc;
   }
   var MESI3 = ["gen","feb","mar","apr","mag","giu","lug","ago","set","ott","nov","dic"];
+  function shortDate(s) { var p = s.split("-"); return (+p[2]) + " " + MESI3[+p[1] - 1] + " " + p[0]; }
   function isoLabel(s) { var p = s.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }
   function digestBox(r) { // riepilogo del risultato: numeri chiave, righe per disciplina, righe previste per mese
     var g = r.digest, sm = r.summary || {}, box = el("div", "dg");
@@ -732,7 +733,7 @@
     tile(g.disciplines.length, g.disciplines.length === 1 ? "disciplina" : "discipline");
     if (g.first && g.last) {
       var days = Math.round((Date.parse(g.last) - Date.parse(g.first)) / 864e5), mo = Math.round(days / 30.44);
-      tile(days < 60 ? days + " giorni" : mo + " mesi", "durata progetto\n" + isoLabel(g.first) + " → " + isoLabel(g.last));
+      tile(days < 60 ? days + " giorni" : mo + " mesi", "durata progetto\ndal " + shortDate(g.first) + "\nal " + shortDate(g.last));
       kpi.lastChild.lastChild.style.whiteSpace = "pre-line";
     }
     box.appendChild(kpi);
@@ -957,7 +958,7 @@
           br.disabled = true; br.textContent = "Controllo…";
           call("mdr_esistenti", { project_code: r.project_code }).then(function (d) { return (d && d.esistenti) || []; }, function () { return null; }).then(function (ex) {
             if (!br.isConnected) return;
-            br.disabled = false; br.dataset.sure = "1"; br.textContent = "Conferma e avvia"; br.className = "";
+            br.disabled = false; br.dataset.sure = "1"; br.textContent = "Avvia nuova generazione"; br.className = "";
             say($("detmsg"), ex === null
               ? "Non sono riuscito a controllare se esistono altre generazioni del progetto " + r.project_code + ". Se continui ne parte una nuova e consuma altri crediti dei modelli."
               : ex.length
