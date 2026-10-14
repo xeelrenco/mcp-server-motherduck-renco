@@ -35,6 +35,10 @@
   .inp .fr { display:flex; align-items:center; gap:8px; padding:6px 6px 6px 10px; border:1px solid var(--line); border-radius:8px; margin-bottom:4px; font-size:13px; }
   .inp .fr > svg { flex:none; color:var(--muted); } .inp .fr .n { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tech { margin-top:10px; text-align:right; }
+  .crumb { margin:2px 0 8px; } button.lnkb { background:none; border:0; color:var(--muted); padding:4px 8px 4px 0; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:3px; cursor:pointer; } button.lnkb:hover { color:var(--accent); }
+  .facts { display:flex; flex-wrap:wrap; gap:8px 28px; margin:12px 0 2px; padding:10px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .facts .fa span { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; } .facts .fa b { display:block; font-size:14px; margin-top:1px; font-variant-numeric:tabular-nums; }
+  .rl { display:flex; flex-direction:column; gap:5px; max-width:340px; } .rl button { align-self:flex-start; } .rl .hint { font-size:12px; color:var(--muted); line-height:1.35; }
   .prep { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin:6px 0 4px; }
   .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:rot .8s linear infinite; }
   @keyframes rot { to { transform:rotate(360deg); } }
@@ -143,6 +147,7 @@
   .bar2 .sp { flex:1; }
   .hide { display:none; }
   .ops { display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
+  .ops { align-items:flex-start; }
   .ops .danger { margin-left:auto; }
   .actions.files { align-items:center; margin-top:4px; }
   .empty { text-align:center; padding:28px 12px; color:var(--muted); }
@@ -204,7 +209,7 @@
 </section>
 
 <section id="v-det" class="hide">
-  <div class="actions"><button class="sec" id="back">← Torna all'elenco</button></div>
+  <div class="crumb"><button class="lnkb" id="back" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Tutte le generazioni</button></div>
   <div id="det"></div>
 </section>
 
@@ -900,17 +905,19 @@
       box.appendChild(el("div", "muted", (r.step_label || "") + " · " + r.progress + "%"));
     }
     if (r.steps && r.steps.length) box.appendChild(timeline(r));
+    var fc = el("div", "facts"); // quando, quanto è durata, da che data parte il progetto: una riga sola
+    function fact(l, v) { var x = el("div", "fa"); x.appendChild(el("span", "", l)); x.appendChild(el("b", "", v)); fc.appendChild(x); }
+    fact("Avviata", relLabel(r.created_label));
+    if (r.finished_label) fact("Terminata", relLabel(r.finished_label));
+    if (r.summary && typeof r.summary["Durata (minuti)"] === "number") fact("Durata", Math.max(1, Math.round(r.summary["Durata (minuti)"])) + " min");
+    if (r.start_label) fact("Inizio progetto", r.start_label);
+    box.appendChild(fc);
     var d = el("dl");
-    d.appendChild(dl("Avviata", relLabel(r.created_label)));
-    if (r.finished_label) d.appendChild(dl("Terminata", relLabel(r.finished_label)));
-    if (r.digest && r.summary && typeof r.summary["Durata (minuti)"] === "number") d.appendChild(dl("Durata", Math.max(1, Math.round(r.summary["Durata (minuti)"])) + " min"));
-    if (r.start_label) d.appendChild(dl("Inizio progetto", r.start_label));
     if (!r.digest && r.summary && typeof r.summary === "object") Object.keys(r.summary).forEach(function (k) {
-      var v = r.summary[k]; if (v === null || typeof v === "object") return;
-      if (k === "Durata (minuti)" && typeof v === "number") d.appendChild(dl("Durata", Math.round(v) + " min"));
-      else d.appendChild(dl(k.replace(/_/g, " "), String(v)));
+      var v = r.summary[k]; if (k === "Durata (minuti)" || v === null || typeof v === "object") return;
+      d.appendChild(dl(k.replace(/_/g, " "), String(v)));
     });
-    box.appendChild(d);
+    if (d.childNodes.length) box.appendChild(d);
     if (r.digest) box.appendChild(digestBox(r));
     if (r.error_hint) { var eh = el("div", "msg err"); eh.appendChild(el("b", "", r.error_hint)); if (r.error) eh.appendChild(el("div", "muted", "Dettaglio tecnico: " + r.error)); box.appendChild(eh); }
     else if (r.error) box.appendChild(el("div", "msg err", r.error));
@@ -942,7 +949,7 @@
       dn.innerHTML = DOWNI; dn.title = "Scarica " + n; dn.setAttribute("aria-label", "Scarica " + n); fr.appendChild(dn); fl.appendChild(fr);
     });
     if (!r.active && r.sow_files.length) {
-      var lbl = r.state === "failed" ? "Riprova con gli stessi file" : "Rilancia con gli stessi file";
+      var lbl = r.state === "failed" ? "Riprova con gli stessi file" : "Nuova generazione da questi file";
       var br = el("button", r.state === "failed" ? "" : "sec", lbl);
       br.onclick = function () {
         var base = r.state === "failed" ? "" : "sec";
@@ -964,7 +971,10 @@
         call("mdr_rilancia", { job_id: curJob }).then(function (n) {
           runs[n.job_id] = n; if (cache) { cache.runs.unshift(n); cache.at = 0; } curJob = n.job_id; links = null; show("det");
         }).catch(function (e) { br.disabled = false; br.textContent = lbl; br.className = base; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
-      }; ops.appendChild(br);
+      };
+      var rl = el("div", "rl"); rl.appendChild(br);
+      rl.appendChild(el("div", "hint", r.state === "failed" ? "Parte una nuova generazione con gli stessi file; questa resta nell'elenco." : "Questa generazione resta com'è: ne parte una nuova, separata, con gli stessi Scope of Work."));
+      ops.appendChild(rl);
     }
     if (!r.active) {
       bn.onclick = function () {
