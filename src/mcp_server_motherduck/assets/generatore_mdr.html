@@ -79,13 +79,14 @@
   button.ico { padding:6px 8px; line-height:0; }
   :root { --c2:#0f8b8d; }
   @media (prefers-color-scheme: dark) { :root { --c2:#3fc1c3; } }
-  .dg { margin:12px 0 4px; }
-  .kpi { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:8px; margin:0 0 6px; }
-  .kpi .k { border:1px solid var(--line); border-radius:10px; padding:8px 11px; background:var(--soft); }
-  .kpi .k b { display:block; font-size:22px; line-height:1.15; font-variant-numeric:tabular-nums; }
-  .kpi .k span { display:block; font-size:12px; color:var(--muted); line-height:1.3; margin-top:2px; }
-  .dg h4 { font-size:12px; margin:14px 0 6px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
-  .dbar { display:grid; grid-template-columns:minmax(80px,140px) 1fr 62px; gap:10px; align-items:center; padding:2px 0; font-size:13px; }
+  .dg { margin:10px 0 2px; }
+  .dgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:4px 22px; align-items:start; }
+  .kpi { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); gap:6px; margin:0 0 2px; }
+  .kpi .k { border:1px solid var(--line); border-radius:10px; padding:6px 10px; background:var(--soft); }
+  .kpi .k b { display:block; font-size:18px; line-height:1.15; font-variant-numeric:tabular-nums; }
+  .kpi .k span { display:block; font-size:11px; color:var(--muted); line-height:1.25; margin-top:1px; }
+  .dg h4 { font-size:11px; margin:10px 0 4px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .dbar { display:grid; grid-template-columns:minmax(80px,140px) 1fr 62px; gap:10px; align-items:center; padding:1px 0; font-size:12px; }
   .dbar .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .dbar .tr { height:10px; border-radius:99px; background:var(--soft); border:1px solid var(--line); overflow:hidden; } .dbar .tr i { display:block; height:100%; background:var(--accent); border-radius:99px; }
   .dbar .nn { text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); font-size:12px; }
@@ -93,7 +94,7 @@
   .hist .c { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
   .hist .c i { flex:none; display:block; width:100%; background:var(--c2); border-radius:4px 4px 2px 2px; opacity:.8; min-height:3px; } .hist .c.pk i { opacity:1; }
   .hist .v { font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; margin-bottom:2px; }
-  .hist .m { font-size:10px; color:var(--muted); margin-top:3px; height:24px; text-transform:uppercase; line-height:1.15; text-align:center; } .hist .m u { display:block; text-decoration:none; opacity:.7; }
+  .hist .m { font-size:10px; color:var(--muted); margin-top:3px; height:22px; text-transform:uppercase; line-height:1.15; text-align:center; } .hist .m u { display:block; text-decoration:none; opacity:.7; }
   .dg .foot { margin-top:8px; font-size:12px; color:var(--muted); }
   .tl { list-style:none; margin:6px 0 4px; padding:0; }
   .tl li { position:relative; display:flex; align-items:center; gap:8px; padding:3px 0 3px 26px; font-size:13px; color:var(--muted); }
@@ -806,13 +807,14 @@ window.__mcpApps={App:OO};})();</script>
       kpi.lastChild.lastChild.style.whiteSpace = "pre-line";
     }
     box.appendChild(kpi);
-    box.appendChild(el("h4", "", "Righe MDR per disciplina"));
-    var top = g.disciplines.slice(0, 6), rest = g.disciplines.slice(6), restN = 0; rest.forEach(function (x) { restN += x.rows; });
+    var grid = el("div", "dgrid"), c1 = el("div"), c2 = el("div"); grid.appendChild(c1); grid.appendChild(c2); box.appendChild(grid);
+    c1.appendChild(el("h4", "", "Righe MDR per disciplina"));
+    var top = g.disciplines.slice(0, 5), rest = g.disciplines.slice(5), restN = 0; rest.forEach(function (x) { restN += x.rows; });
     var mx = top.length ? top[0].rows : 1; if (restN > mx) mx = restN;
     function bar(label, n, tip) {
       var row = el("div", "dbar"), nm = el("span", "nm", label), tr = el("span", "tr"), fi = el("i"), nn = el("span", "nn", n + " · " + Math.round(100 * n / (total || 1)) + "%");
       if (tip) nm.title = tip; fi.style.width = Math.max(3, Math.round(100 * n / mx)) + "%"; tr.appendChild(fi);
-      row.appendChild(nm); row.appendChild(tr); row.appendChild(nn); box.appendChild(row);
+      row.appendChild(nm); row.appendChild(tr); row.appendChild(nn); c1.appendChild(row);
     }
     top.forEach(function (x) { bar(x.name || x.code, x.rows, x.name ? x.code : ""); });
     if (rest.length) bar("Altre (" + rest.length + ")", restN, rest.map(function (x) { return x.name || x.code; }).join(", "));
@@ -821,21 +823,20 @@ window.__mcpApps={App:OO};})();</script>
       var a = g.months[0].ym.split("-"), z = g.months[g.months.length - 1].ym.split("-"), y = +a[0], m0 = +a[1], list = [];
       while (y < +z[0] || (y === +z[0] && m0 <= +z[1])) { var ym = y + "-" + pad2(m0); list.push({ ym: ym, y: y, m: m0, n: by[ym] || 0 }); m0++; if (m0 > 12) { m0 = 1; y++; } if (list.length > 120) break; }
       var pk = 0; list.forEach(function (x) { if (x.n > pk) pk = x.n; });
-      box.appendChild(el("h4", "", "Righe MDR previste per mese"));
+      c2.appendChild(el("h4", "", "Righe MDR previste per mese"));
       var hs = el("div", "hist");
       list.forEach(function (x, ix) {
         var c = el("div", "c" + (x.n === pk ? " pk" : "")), bi = el("i");
-        bi.style.height = Math.max(3, Math.round(76 * x.n / (pk || 1))) + "px";
+        bi.style.height = Math.max(3, Math.round(54 * x.n / (pk || 1))) + "px";
         c.title = MESI[x.m - 1] + " " + x.y + ": " + x.n;
         if (list.length <= 24) c.appendChild(el("span", "v", String(x.n)));
         c.appendChild(bi);
         var lb = el("span", "m", MESI3[x.m - 1]); if (ix === 0 || x.m === 1) lb.appendChild(el("u", "", String(x.y))); c.appendChild(lb); hs.appendChild(c);
       });
-      box.appendChild(hs);
+      c2.appendChild(hs);
       var pm = list.filter(function (x) { return x.n === pk; })[0];
-      if (pm && pk) box.appendChild(el("div", "foot", "Picco a " + MESI[pm.m - 1] + " " + pm.y + ": " + pk + " righe"));
+      if (pm && pk) c2.appendChild(el("div", "foot", "Picco a " + MESI[pm.m - 1] + " " + pm.y + ": " + pk + " righe"));
     }
-    if (typeof sm["Durata (minuti)"] === "number") box.appendChild(el("div", "foot", "Generato in " + Math.max(1, Math.round(sm["Durata (minuti)"])) + " min"));
     return box;
   }
   // ---- anteprima dei PDF dentro il pannello (pdf.js incluso nella pagina: nessuna rete esterna, caricato solo al primo uso)
@@ -874,7 +875,7 @@ window.__mcpApps={App:OO};})();</script>
     var tot = el("span", "", "/ -"); pn.appendChild(inp); pn.appendChild(tot); ph.appendChild(pn);
     function btn(txt, tip, cls) { var b = el("button", cls || "sec", txt); b.type = "button"; b.title = tip; b.setAttribute("aria-label", tip); ph.appendChild(b); return b; }
     var zo = btn("−", "Riduci"), zi = btn("+", "Ingrandisci"), zf = btn("Adatta", "Adatta alla larghezza"), ez = btn("", "Ingrandisci", "sec ico"), cl = btn("Chiudi (Esc)", "Chiudi l'anteprima", "");
-    ez.id = "pvz"; ez.onclick = function () { $("zoom").onclick(); }; // ingrandisce il pannello senza chiudere l'anteprima
+    ez.id = "pvz"; ez.innerHTML = $("zoom").innerHTML; ez.title = $("zoom").title; ez.setAttribute("aria-label", $("zoom").title); ez.onclick = function () { $("zoom").onclick(); }; // ingrandisce il pannello senza chiudere l'anteprima
     var box = el("div", "pb"); box.tabIndex = -1;
     o.appendChild(ph); o.appendChild(box); document.body.appendChild(o); document.body.classList.add("pvopen");
     var pages = [], epoch = 0;
@@ -973,6 +974,7 @@ window.__mcpApps={App:OO};})();</script>
     var d = el("dl");
     d.appendChild(dl("Avviata", relLabel(r.created_label)));
     if (r.finished_label) d.appendChild(dl("Terminata", relLabel(r.finished_label)));
+    if (r.digest && r.summary && typeof r.summary["Durata (minuti)"] === "number") d.appendChild(dl("Durata", Math.max(1, Math.round(r.summary["Durata (minuti)"])) + " min"));
     if (r.start_label) d.appendChild(dl("Inizio progetto", r.start_label));
     if (r.sow_files.length) d.appendChild(dl("SoW", r.sow_files.join(", ")));
     if (!r.digest && r.summary && typeof r.summary === "object") Object.keys(r.summary).forEach(function (k) {

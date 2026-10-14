@@ -439,6 +439,7 @@ class GeneratorService:
     def __init__(self, backend) -> None:
         self.b = backend
         self._final: Dict[str, Dict] = {}
+        self._final_at: Dict[str, float] = {}  # quando è stato messo in memoria (per i completati senza riepilogo)
         self.max_parallel = int(_env_num("MDR_MAX_PARALLEL", 0))
         self.stale_hours = _env_num("MDR_STALE_HOURS", 4)
         self.max_file_mb = int(_env_num("MDR_MAX_FILE_MB", 32))
@@ -507,6 +508,9 @@ class GeneratorService:
     def _load(self, job_id: str) -> Optional[Dict]:
         """Stato di una generazione. Gli stati finali non cambiano più: si tengono in memoria."""
         cached = self._final.get(job_id)
+        if cached is not None and cached.get("state") == "succeeded" and not cached.get("digest") \
+                and time.monotonic() - self._final_at.get(job_id, 0) > 30:
+            cached = None  # il riepilogo può essere stato aggiunto dopo (recupero): si rilegge ogni 30 secondi
         if cached is not None:
             return dict(cached)
         run = self.b.read_json(status_key(job_id))
@@ -515,6 +519,7 @@ class GeneratorService:
         run = self._refresh(run)
         if run.get("state") not in ACTIVE_STATES:
             self._final[job_id] = dict(run)
+            self._final_at[job_id] = time.monotonic()
         elif self.b.exists(f"jobs/{job_id}/cancel"):
             # Annullata dall'utente: il motore impiega qualche secondo a fermarsi e nel frattempo può riscrivere
             # "in corso". Per chi guarda la generazione è già annullata (non si salva: lo stato finale lo scrive il motore).
