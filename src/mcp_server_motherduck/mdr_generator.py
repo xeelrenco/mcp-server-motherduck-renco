@@ -50,7 +50,7 @@ GEN_UI_META = {
 }
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-TOTAL_STEPS = 13
+TOTAL_STEPS = 12
 STATE_LABELS = {
     "queued": "In coda",
     "running": "In corso",
@@ -315,7 +315,7 @@ def _tz_offset_hours(d: dt.datetime) -> int:
 
 STEP_NAMES = ["Lettura Scope of Work", "Validazione discipline e capitoli", "Verifica catalogo documenti", "Filtri SoW sui documenti",
               "Profili documento", "Numero di istanze per documento", "Titoli specifici da SoW", "Espansione righe MDR",
-              "Controllo documenti obbligatori", "Pianificazione date", "Confronto con storico", "Compilazione Excel MDR", "Report qualità"]
+              "Controllo documenti obbligatori", "Pianificazione date", "Confronto con storico", "Compilazione Excel MDR"]
 
 
 def _parse_iso(value: Any) -> Optional[dt.datetime]:
@@ -443,7 +443,7 @@ class GeneratorService:
             "state": state,
             "state_label": STATE_LABELS.get(state, state),
             "active": state in ACTIVE_STATES,
-            "progress": 100 if state == "succeeded" else round(100 * step / TOTAL_STEPS),
+            "progress": 100 if state == "succeeded" else min(99, round(100 * step / TOTAL_STEPS)),
             "step": step,
             "total_steps": run.get("total_steps") or TOTAL_STEPS,
             "step_label": run.get("step_label"),
@@ -481,6 +481,10 @@ class GeneratorService:
         run = self._refresh(run)
         if run.get("state") not in ACTIVE_STATES:
             self._final[job_id] = dict(run)
+        elif self.b.exists(f"jobs/{job_id}/cancel"):
+            # Annullata dall'utente: il motore impiega qualche secondo a fermarsi e nel frattempo può riscrivere
+            # "in corso". Per chi guarda la generazione è già annullata (non si salva: lo stato finale lo scrive il motore).
+            run = dict(run, state="cancelled", step_label="Annullato")
         return run
 
     def list_runs(self, limit: int = 10, state: str = "", q: str = "") -> Tuple[List[Dict], bool]:

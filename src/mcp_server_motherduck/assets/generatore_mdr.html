@@ -77,6 +77,7 @@
   .tl .tb { width:54px; height:4px; border-radius:99px; background:var(--soft); overflow:hidden; flex:none; } .tl .tb i { display:block; height:100%; background:var(--accent); border-radius:99px; opacity:.7; }
   @keyframes tlp { 0% { box-shadow:0 0 0 0 rgba(31,95,174,.5); } 100% { box-shadow:0 0 0 8px rgba(31,95,174,0); } }
   details.tld { margin:8px 0 2px; } details.tld > summary { cursor:pointer; font-weight:600; font-size:13px; color:var(--muted); padding:2px 0; }
+  button.sm { padding:4px 11px; font-size:12px; }
   .cal.rng { top:calc(100% + 6px); left:0; width:252px; }
   .cal .p { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
   .cal .p button { background:var(--soft); border:1px solid var(--line); color:var(--text); border-radius:99px; padding:2px 9px; font-size:11px; font-weight:600; }
@@ -734,9 +735,29 @@ window.__mcpApps={App:OO};})();</script>
     });
   }
   var cancelArm = { job: "", until: 0 };
+  function cancelBtn(r) { // in alto, accanto allo stato: sempre visibile mentre la generazione è in corso
+      var armed = cancelArm.job === r.job_id && Date.now() < cancelArm.until; // la scheda si ridisegna ogni 5 s: la conferma si ricorda
+      var bc = el("button", "danger sm", armed ? "Conferma: annulla generazione" : "Annulla"); if (armed) bc.dataset.sure = "1";
+      bc.onclick = function () {
+        if (!bc.dataset.sure) { // secondo clic: fermare una generazione butta via il lavoro e i crediti già spesi
+          cancelArm = { job: r.job_id, until: Date.now() + 6000 };
+          bc.dataset.sure = "1"; bc.textContent = "Conferma: annulla generazione";
+          setTimeout(function () { if (bc.isConnected && bc.dataset.sure) { delete bc.dataset.sure; bc.textContent = "Annulla"; cancelArm = { job: "", until: 0 }; } }, 6000);
+          return;
+        }
+        bc.disabled = true;
+        var cj = curJob; clearTimeout(timer);
+        call("mdr_annulla", { job_id: cj }).then(function (n) { // subito la scheda "annullata", senza tornare indietro per un aggiornamento in ritardo
+          runs[n.job_id] = n; track([n]); cancelArm = { job: "", until: 0 };
+          if (cache) { var ix = cache.runs.findIndex(function (x) { return x.job_id === n.job_id; }); if (ix >= 0) cache.runs[ix] = n; tabCount(); }
+          if (cj === curJob) { drawDet(n); }
+        }).catch(function (e) { var dm = $("detmsg"); if (dm) say(dm, String(e.message || e), "err"); bc.disabled = false; });
+      };
+      return bc;
+  }
   var tlOpen = false;
   function fmtSec(s) { return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + pad2(s % 60) + " s"; }
-  function timeline(r) { // i 13 passi: fatti, in corso, da fare, con il tempo impiegato (e una barretta in proporzione)
+  function timeline(r) { // i passi: fatti, in corso, da fare, con il tempo impiegato (e una barretta in proporzione)
     var ul = el("ul", "tl"), mx = 1;
     r.steps.forEach(function (s) { if (s.sec > mx) mx = s.sec; });
     r.steps.forEach(function (s) {
@@ -755,7 +776,7 @@ window.__mcpApps={App:OO};})();</script>
   }
   function drawDet(r, loading) {
     var box = $("det"); box.textContent = "";
-    var row = el("div", "row"); row.appendChild(el("span", "name", r.name || "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
+    var row = el("div", "row"); row.appendChild(el("span", "name", r.name || "Progetto " + r.project_code)); row.appendChild(badge(r)); if (r.active) row.appendChild(cancelBtn(r)); box.appendChild(row);
     if (r.name) box.appendChild(el("div", "muted", "Progetto " + r.project_code));
     if (r.active) {
       var bar = el("div", "bar"), i = el("i"); i.style.width = r.progress + "%"; bar.appendChild(i); box.appendChild(bar);
@@ -842,20 +863,6 @@ window.__mcpApps={App:OO};})();</script>
         confirmDelete(bd, [r.job_id], function () { return "Elimina"; }, function (res) { if (cache) cache.runs = cache.runs.filter(function (r) { return res.eliminati.indexOf(r.job_id) < 0; }); show("list"); });
       }; ops.appendChild(bd);
     }
-    if (r.active) {
-      var armed = cancelArm.job === r.job_id && Date.now() < cancelArm.until; // la scheda si ridisegna ogni 5 s: la conferma si ricorda
-      var bc = el("button", "danger", armed ? "Conferma: annulla generazione" : "Annulla"); if (armed) bc.dataset.sure = "1";
-      bc.onclick = function () {
-        if (!bc.dataset.sure) { // secondo clic: fermare una generazione butta via il lavoro e i crediti già spesi
-          cancelArm = { job: r.job_id, until: Date.now() + 6000 };
-          bc.dataset.sure = "1"; bc.textContent = "Conferma: annulla generazione";
-          setTimeout(function () { if (bc.isConnected && bc.dataset.sure) { delete bc.dataset.sure; bc.textContent = "Annulla"; cancelArm = { job: "", until: 0 }; } }, 6000);
-          return;
-        }
-        bc.disabled = true;
-        call("mdr_annulla", { job_id: curJob }).then(drawDet).catch(function (e) { say($("detmsg"), String(e.message || e), "err"); bc.disabled = false; });
-      }; ops.appendChild(bc);
-    }
     if (a.childNodes.length) box.appendChild(a);
     if (fl.childNodes.length) { var fh = el("span", "muted", "File:"); fl.insertBefore(fh, fl.firstChild); box.appendChild(fl); }
     if (ops.childNodes.length) box.appendChild(ops);
@@ -868,6 +875,7 @@ window.__mcpApps={App:OO};})();</script>
     if (!again) { if (runs[job]) drawDet(runs[job], true); else skelDet($("det")); } // subito i dati già noti, poi l'aggiornamento
     call("mdr_dettaglio", { job_id: job }).then(function (r) {
       if (job !== curJob || $("v-det").classList.contains("hide")) return;
+      if (r.active && runs[r.job_id] && runs[r.job_id].state === "cancelled") return; // risposta partita prima dell'annullamento: la ignoro
       runs[r.job_id] = r; track([r]);
       if (cache) { var ix = cache.runs.findIndex(function (x) { return x.job_id === r.job_id; }); if (ix >= 0) cache.runs[ix] = r; tabCount(); }
       drawDet(r);
