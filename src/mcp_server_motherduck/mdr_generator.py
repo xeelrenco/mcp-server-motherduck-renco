@@ -355,6 +355,24 @@ def _timeline(run: Dict) -> List[Dict]:
 SUMMARY_LABELS = [("mdr_rows", "Righe MDR"), ("documents", "Documenti"), ("elapsed_minutes", "Durata (minuti)")]
 
 
+def _public_digest(d: Any) -> Optional[Dict]:
+    """Riepilogo dell'MDR per il pannello: righe per disciplina e righe previste per mese (solo dati puliti)."""
+    if not isinstance(d, dict):
+        return None
+    def num(v: Any) -> int:
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+    discs = [{"code": str(x.get("code") or "")[:12], "name": str(x.get("name") or "")[:60], "rows": num(x.get("rows"))}
+             for x in (d.get("disciplines") or [])[:60] if isinstance(x, dict) and num(x.get("rows")) > 0]
+    months = [{"ym": str(x.get("ym") or "")[:7], "rows": num(x.get("rows"))}
+              for x in (d.get("months") or [])[:240] if isinstance(x, dict) and re.match(r"^\d{4}-\d{2}$", str(x.get("ym") or ""))]
+    out: Dict[str, Any] = {"disciplines": discs, "months": months}
+    for k in ("first", "last"):
+        v = str(d.get(k) or "")
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            out[k] = v
+    return out if discs else None
+
+
 def _public_summary(summary: Any) -> Optional[Dict]:
     """Del riepilogo del motore si mostrano solo alcuni dati, in italiano (niente costi)."""
     if not isinstance(summary, dict):
@@ -460,6 +478,8 @@ class GeneratorService:
         }
         if detail and (step or state == "succeeded"):
             view["steps"] = _timeline(run)
+        if detail and state == "succeeded":
+            view["digest"] = _public_digest(run.get("digest"))
         return view
 
     def get(self, job_id: str) -> Dict:
