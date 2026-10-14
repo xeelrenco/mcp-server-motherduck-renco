@@ -313,6 +313,45 @@ def _tz_offset_hours(d: dt.datetime) -> int:
     return 2 if last_sunday(3) <= d.astimezone(dt.timezone.utc) < last_sunday(10) else 1
 
 
+STEP_NAMES = ["Lettura Scope of Work", "Validazione discipline e capitoli", "Verifica catalogo documenti", "Filtri SoW sui documenti",
+              "Profili documento", "Numero di istanze per documento", "Titoli specifici da SoW", "Espansione righe MDR",
+              "Controllo documenti obbligatori", "Pianificazione date", "Confronto con storico", "Compilazione Excel MDR", "Report qualità"]
+
+
+def _parse_iso(value: Any) -> Optional[dt.datetime]:
+    try:
+        d = dt.datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)
+
+
+def _timeline(run: Dict) -> List[Dict]:
+    """I 13 passi con stato (done/current/failed/stopped/todo) e secondi impiegati (None se non registrati)."""
+    state = run.get("state", "queued")
+    step = int(run.get("step") or 0)
+    times = run.get("step_times") or {}
+    finished = _parse_iso(run.get("finished_at"))
+    now = dt.datetime.now(dt.timezone.utc)
+    out = []
+    for n, label in enumerate(STEP_NAMES, 1):
+        if state == "succeeded" or n < step:
+            st = "done"
+        elif n == step:
+            st = {"failed": "failed", "cancelled": "stopped"}.get(state, "current")
+        else:
+            st = "todo"
+        start, end = _parse_iso(times.get(str(n))), _parse_iso(times.get(str(n + 1)))
+        if start and not end:
+            if st == "current":
+                end = now
+            elif finished and (n == step or (state == "succeeded" and n == len(STEP_NAMES))):
+                end = finished
+        sec = round((end - start).total_seconds()) if start and end and st != "todo" and end >= start else None
+        out.append({"n": n, "label": label, "st": st, "sec": sec})
+    return out
+
+
 SUMMARY_LABELS = [("mdr_rows", "Righe MDR"), ("documents", "Documenti"), ("elapsed_minutes", "Durata (minuti)")]
 
 
@@ -394,11 +433,11 @@ class GeneratorService:
             self.b.write_json(status_key(job_id), run)
         return run
 
-    def view(self, run: Dict) -> Dict:
+    def view(self, run: Dict, detail: bool = False) -> Dict:
         state = run.get("state", "queued")
         step = int(run.get("step") or 0)
         outputs = run.get("outputs") or {}
-        return {
+        view = {
             "job_id": run["job_id"],
             "project_code": run.get("project_code"),
             "state": state,
@@ -419,6 +458,9 @@ class GeneratorService:
             "has_mdr": bool(outputs.get("mdr")),
             "summary": _public_summary(run.get("summary")),
         }
+        if detail and (step or state == "succeeded"):
+            view["steps"] = _timeline(run)
+        return view
 
     def get(self, job_id: str) -> Dict:
         if not valid_job_id(job_id):
@@ -815,7 +857,7 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
     @mcp.tool(name="mdr_dettaglio", title="Dettaglio generazione", description="Usato solo dal pannello.",
               annotations=read_hints, meta=app_only)
     async def mdr_dettaglio(job_id: str) -> dict:
-        return svc.view(await run(svc.get, job_id))
+        return svc.view(await run(svc.get, job_id), detail=True)
 
     @mcp.tool(name="mdr_prepara_upload", title="Prepara caricamento", description="Usato solo dal pannello.",
               annotations=write_hints, meta=app_only)

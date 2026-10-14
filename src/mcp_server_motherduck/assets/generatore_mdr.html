@@ -63,6 +63,20 @@
   .cal .g button.out { color:var(--muted); opacity:.45; } .cal .g button.we { color:var(--muted); }
   .cal .g button.today { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--accent); font-weight:700; }
   .cal .g button.sel { background:var(--accent); color:#fff; box-shadow:none; font-weight:700; opacity:1; }
+  .tl { list-style:none; margin:6px 0 4px; padding:0; }
+  .tl li { position:relative; display:flex; align-items:center; gap:8px; padding:3px 0 3px 26px; font-size:13px; color:var(--muted); }
+  .tl li::before { content:""; position:absolute; left:6px; top:0; bottom:0; width:2px; background:var(--line); }
+  .tl li:first-child::before { top:50%; } .tl li:last-child::before { bottom:50%; }
+  .tl .dot { position:absolute; left:0; top:50%; width:14px; height:14px; margin-top:-7px; border-radius:50%; background:var(--bg); border:2px solid var(--line); box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:9px; line-height:1; font-weight:800; color:#fff; z-index:1; }
+  .tl li.done { color:var(--text); } .tl li.done .dot { background:var(--ok); border-color:var(--ok); } .tl li.done .dot::after { content:"\2713"; }
+  .tl li.current { color:var(--text); font-weight:600; } .tl li.current .dot { border-color:var(--accent); background:var(--accent); animation:tlp 1.4s ease-out infinite; }
+  .tl li.failed { color:var(--err); font-weight:600; } .tl li.failed .dot { background:var(--err); border-color:var(--err); } .tl li.failed .dot::after { content:"\00d7"; font-size:12px; }
+  .tl li.stopped .dot { background:var(--muted); border-color:var(--muted); } .tl li.stopped .dot::after { content:"\2013"; }
+  .tl li.done::before { background:var(--ok); opacity:.45; }
+  .tl .lb { flex:1; min-width:0; } .tl .tm { font-variant-numeric:tabular-nums; font-size:12px; white-space:nowrap; }
+  .tl .tb { width:54px; height:4px; border-radius:99px; background:var(--soft); overflow:hidden; flex:none; } .tl .tb i { display:block; height:100%; background:var(--accent); border-radius:99px; opacity:.7; }
+  @keyframes tlp { 0% { box-shadow:0 0 0 0 rgba(31,95,174,.5); } 100% { box-shadow:0 0 0 8px rgba(31,95,174,0); } }
+  details.tld { margin:8px 0 2px; } details.tld > summary { cursor:pointer; font-weight:600; font-size:13px; color:var(--muted); padding:2px 0; }
   .cal.rng { top:calc(100% + 6px); left:0; width:252px; }
   .cal .p { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
   .cal .p button { background:var(--soft); border:1px solid var(--line); color:var(--text); border-radius:99px; padding:2px 9px; font-size:11px; font-weight:600; }
@@ -720,6 +734,25 @@ window.__mcpApps={App:OO};})();</script>
     });
   }
   var cancelArm = { job: "", until: 0 };
+  var tlOpen = false;
+  function fmtSec(s) { return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + pad2(s % 60) + " s"; }
+  function timeline(r) { // i 13 passi: fatti, in corso, da fare, con il tempo impiegato (e una barretta in proporzione)
+    var ul = el("ul", "tl"), mx = 1;
+    r.steps.forEach(function (s) { if (s.sec > mx) mx = s.sec; });
+    r.steps.forEach(function (s) {
+      var li = el("li", s.st); li.appendChild(el("span", "dot")); li.appendChild(el("span", "lb", s.label));
+      if (s.sec !== null && s.sec !== undefined) {
+        var tb = el("span", "tb"), bi = el("i"); bi.style.width = Math.max(4, Math.round(100 * s.sec / mx)) + "%"; tb.appendChild(bi); li.appendChild(tb);
+        li.appendChild(el("span", "tm", fmtSec(s.sec)));
+      }
+      ul.appendChild(li);
+    });
+    if (r.active) return ul;
+    var dt = el("details", "tld"); dt.open = tlOpen;
+    dt.ontoggle = function () { tlOpen = dt.open; };
+    dt.appendChild(el("summary", "", "Passi della generazione")); dt.appendChild(ul);
+    return dt;
+  }
   function drawDet(r, loading) {
     var box = $("det"); box.textContent = "";
     var row = el("div", "row"); row.appendChild(el("span", "name", r.name || "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
@@ -728,6 +761,7 @@ window.__mcpApps={App:OO};})();</script>
       var bar = el("div", "bar"), i = el("i"); i.style.width = r.progress + "%"; bar.appendChild(i); box.appendChild(bar);
       box.appendChild(el("div", "muted", (r.step_label || "") + " · " + r.progress + "%"));
     }
+    if (r.steps && r.steps.length) box.appendChild(timeline(r));
     var d = el("dl");
     d.appendChild(dl("Avviata", relLabel(r.created_label)));
     if (r.finished_label) d.appendChild(dl("Terminata", relLabel(r.finished_label)));
