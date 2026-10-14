@@ -13,7 +13,9 @@
   }
   * { box-sizing: border-box; }
   body { margin:0; padding:14px; min-height:540px; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  h1 { font-size:17px; margin:0 0 10px; }
+  .top { display:flex; align-items:center; gap:10px; margin:0 0 10px; }
+  h1 { font-size:17px; margin:0; flex:1; }
+  #zoom { padding:6px 8px; line-height:0; }
   .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:12px; }
   .tab { background:none; color:var(--muted); border:0; border-bottom:2px solid transparent; border-radius:0; padding:6px 12px; font-weight:600; }
   .tab.on { color:var(--accent); border-bottom-color:var(--accent); }
@@ -88,7 +90,7 @@
 </style>
 </head>
 <body>
-<h1>Generatore MDR</h1>
+<div class="top"><h1>Generatore MDR</h1><button class="sec" id="zoom" type="button" title="Ingrandisci" aria-label="Ingrandisci"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button></div>
 <div id="toasts"></div>
 <div id="cfg"></div>
 <div class="tabs">
@@ -703,6 +705,34 @@
     if (d && d.max_file_mb) { MAXF = d.max_file_mb; MAXT = d.max_upload_mb || MAXT; }
     if (d && d.runs && d.runs.length) { track(d.runs); cache = { runs: d.runs, complete: !d.altri, at: Date.now(), total: 0, server: null }; show("list"); if (d.altri) refresh(); }
   };
+  // ---- ingrandimento: schermo intero se la chat lo permette, altrimenti zoom a due livelli (125%, 150%)
+  var ICON_EXP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>', ICON_COL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>';
+  var ZOOMS = [1, 1.25, 1.5], zoomI = 0, fsMode = false;
+  try { var zs = +localStorage.getItem("mdr_zoom"); if (zs >= 0 && zs < ZOOMS.length) zoomI = zs; } catch (x) {}
+  function applyZoom() {
+    document.body.style.zoom = ZOOMS[zoomI] === 1 ? "" : String(ZOOMS[zoomI]);
+    var back = fsMode || zoomI === ZOOMS.length - 1, tip = fsMode ? "Riduci" : back ? "Vista normale" : zoomI > 0 ? "Ingrandisci ancora" : "Ingrandisci";
+    $("zoom").innerHTML = back ? ICON_COL : ICON_EXP; $("zoom").title = tip; $("zoom").setAttribute("aria-label", tip);
+    if (!fsMode) { try { localStorage.setItem("mdr_zoom", String(zoomI)); } catch (x) {} }
+  }
+  function canFullscreen() { var c = app.getHostContext && app.getHostContext(); return !!(c && c.availableDisplayModes && c.availableDisplayModes.indexOf("fullscreen") >= 0); }
+  function setMode(m) { // la chat potrebbe ignorare la richiesta: dopo 2 secondi si rinuncia
+    return Promise.race([app.requestDisplayMode({ mode: m }), new Promise(function (_, no) { setTimeout(function () { no(new Error("nessuna risposta")); }, 2000); })]).then(function (r) {
+      if (!r || r.mode !== m) throw new Error("rifiutato");
+      fsMode = m === "fullscreen"; zoomI = fsMode ? 1 : 0; applyZoom();
+    });
+  }
+  function stepZoom() { zoomI = (zoomI + 1) % ZOOMS.length; applyZoom(); }
+  $("zoom").onclick = function () {
+    if (fsMode) { setMode("inline").catch(function () { fsMode = false; zoomI = 0; applyZoom(); }); return; }
+    if (zoomI === 0 && canFullscreen()) { setMode("fullscreen").catch(stepZoom); return; }
+    if (zoomI > 0 && canFullscreen()) { zoomI = 0; applyZoom(); return; }
+    stepZoom();
+  };
+  app.onhostcontextchanged = function (c) { // se la chat cambia modalità da sola (es. tasto Esc)
+    if (c && c.displayMode && (c.displayMode === "fullscreen") !== fsMode) { fsMode = c.displayMode === "fullscreen"; zoomI = fsMode ? 1 : 0; applyZoom(); }
+  };
+  applyZoom();
   app.connect && app.connect();
   renderFiles();
 })();
