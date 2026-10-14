@@ -47,7 +47,7 @@
   .muted { color:var(--muted); font-size:12px; }
   #toasts { position:fixed; top:8px; left:12px; right:12px; z-index:50; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
   .toast { pointer-events:auto; display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:8px; font-size:13px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,.18); border:1px solid var(--line); background:var(--ok-bg); color:var(--ok); cursor:pointer; }
-  .toast.bad { background:var(--err-bg); color:var(--err); } .toast span { flex:1; } .toast i { font-style:normal; opacity:.7; }
+  .toast.bad { background:var(--err-bg); color:var(--err); } .toast.neu { background:var(--soft); color:var(--muted); } .toast span { flex:1; } .toast i { font-style:normal; opacity:.7; }
   .bar { height:8px; background:var(--soft); border-radius:99px; overflow:hidden; margin:8px 0 4px; border:1px solid var(--line); }
   .bar > i { display:block; height:100%; background:var(--accent); transition:width .4s; }
   .msg { padding:8px 10px; border-radius:6px; margin:10px 0; font-size:13px; background:var(--wait-bg); color:var(--wait); }
@@ -83,7 +83,8 @@
   <label for="code">Codice progetto</label>
   <input type="text" id="code" maxlength="40" placeholder="es. 5890" autocomplete="off">
   <label for="sd">Data di inizio progetto (facoltativa)</label>
-  <input type="date" id="sd">
+  <input type="text" id="sd" inputmode="numeric" maxlength="10" placeholder="gg/mm/aaaa" autocomplete="off">
+  <div id="sdmsg" class="muted"></div>
   <label>Scope of Work (PDF)</label>
   <div class="drop" id="drop">Trascina qui i PDF oppure clicca per sceglierli<input type="file" id="file" accept="application/pdf,.pdf" multiple class="hide"></div>
   <ul class="files" id="files"></ul>
@@ -231,12 +232,17 @@ window.__mcpApps={App:OO};})();</script>
   var prevActive = {};
   function toast(r) {
     var ok = r.state === "succeeded", bad = r.state === "failed";
-    var box = $("toasts"), n = el("div", "toast" + (bad ? " bad" : ""));
+    var box = $("toasts"), n = el("div", "toast" + (bad ? " bad" : ok ? "" : " neu"));
     n.appendChild(el("span", "", (ok ? "Generazione completata" : bad ? "Generazione in errore" : "Generazione annullata") + " · Progetto " + r.project_code));
     n.appendChild(el("i", "", "Apri"));
     var close = function () { if (n.parentNode) n.parentNode.removeChild(n); };
     n.onclick = function () { close(); curJob = r.job_id; links = null; show("det"); };
     box.appendChild(n); if (!bad) setTimeout(close, 12000);
+  }
+  function note(text) { // avviso breve che sparisce da solo
+    var box = $("toasts"), n = el("div", "toast"); n.appendChild(el("span", "", text));
+    var close = function () { if (n.parentNode) n.parentNode.removeChild(n); };
+    n.onclick = close; box.appendChild(n); setTimeout(close, 5000);
   }
   function track(list) { // avvisa quando una generazione che era in corso termina
     (list || []).forEach(function (r) {
@@ -296,13 +302,27 @@ window.__mcpApps={App:OO};})();</script>
       if (!r.ok) throw new Error("Caricamento di '" + file.name + "' non riuscito (" + r.status + ").");
     });
   }
+  function sdIso() { // gg/mm/aaaa -> aaaa-mm-gg ("" se vuota, null se non valida)
+    var v = $("sd").value.trim(); if (!v) return "";
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v); if (!m) return null;
+    var d = +m[1], mo = +m[2], y = +m[3], dt = new Date(y, mo - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+    return y + "-" + ("0" + mo).slice(-2) + "-" + ("0" + d).slice(-2);
+  }
+  $("sd").oninput = function () {
+    var v = this.value.replace(/[^0-9\/]/g, "");
+    if (/^\d{2}$|^\d{2}\/\d{2}$/.test(v) && (this._len || 0) < v.length) v += "/"; // aggiunge la barra mentre si scrive
+    this._len = v.length; this.value = v;
+    $("sdmsg").textContent = sdIso() === null && v.length >= 8 ? "Data non valida: usa gg/mm/aaaa (es. 15/03/2026)." : "";
+  };
   $("go").onclick = function () {
     if (busy) return;
+    var sdv = sdIso(); if (sdv === null) { $("sdmsg").textContent = "Data non valida: usa gg/mm/aaaa (es. 15/03/2026)."; $("sd").focus(); return; }
     busy = true; renderFiles();
     var box = $("newmsg"), job = null;
     say(box, "Preparo il caricamento…");
     call("mdr_prepara_upload", {
-      project_code: $("code").value.trim(), start_date: $("sd").value || "",
+      project_code: $("code").value.trim(), start_date: sdv,
       files: files.map(function (f) { return { name: f.name, size: f.size }; })
     }).then(function (p) {
       job = p.job_id;
@@ -500,6 +520,23 @@ window.__mcpApps={App:OO};})();</script>
     };
     return a;
   }
+  function copyBtn(kind, name, label) {
+    var b = el("button", "sec", label || "Copia"); b.title = "Copia l'indirizzo del file negli appunti (valido per pochi minuti)";
+    b.onclick = function () {
+      b.disabled = true;
+      var ready = (!links || Date.now() - linksAt > 9 * 60 * 1000) ? fetchLinks(curJob) : Promise.resolve(links);
+      ready.then(function () {
+        var l = linkFor(kind, name); if (!l) throw new Error("link non disponibile");
+        var done = function () { note("Link copiato: valido per " + ((links && links.scadenza_minuti) || 15) + " minuti. Poi va ricopiato."); b.textContent = "Copiato"; setTimeout(function () { b.textContent = label || "Copia"; b.disabled = false; }, 1800); };
+        var legacy = function () { // alternativa quando la chat non consente l'accesso agli appunti
+          try { var ta = document.createElement("textarea"); ta.value = l.url; ta.style.cssText = "position:fixed;opacity:0"; document.body.appendChild(ta); ta.select(); var ok = document.execCommand("copy"); document.body.removeChild(ta); return ok; } catch (x) { return false; }
+        };
+        var fail = function () { if (legacy()) return done(); b.textContent = label || "Copia"; b.disabled = false; showUrl(l); };
+        try { navigator.clipboard.writeText(l.url).then(done, fail); } catch (x) { fail(); }
+      }).catch(function (e) { b.disabled = false; say($("detmsg"), String(e.message || e), "err"); });
+    };
+    return b;
+  }
   function showUrl(l) {
     var box = $("detmsg"); box.textContent = "";
     var m = el("div", "msg", "La chat non ha aperto il file. Copia questo indirizzo e incollalo in una nuova scheda: ");
@@ -552,9 +589,9 @@ window.__mcpApps={App:OO};})();</script>
       return;
     }
     var a = el("div", "actions"), fl = el("div", "actions files"), ops = el("div", "ops");
-    if (r.has_mdr) a.appendChild(makeLink("Scarica MDR", "mdr", "", ""));
-    if (!r.active) fl.appendChild(makeLink("Log", "log", "", "sec"));
-    r.sow_files.forEach(function (n) { fl.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
+    if (r.has_mdr) { a.appendChild(makeLink("Scarica MDR", "mdr", "", "")); a.appendChild(copyBtn("mdr", "", "Copia link")); }
+    if (!r.active) { fl.appendChild(makeLink("Log", "log", "", "sec")); fl.appendChild(copyBtn("log", "")); }
+    r.sow_files.forEach(function (n) { fl.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); fl.appendChild(copyBtn("sow", n)); });
     if (!r.active && r.sow_files.length) {
       var lbl = r.state === "failed" ? "Riprova con gli stessi file" : "Rilancia con gli stessi file";
       var br = el("button", r.state === "failed" ? "" : "sec", lbl);
