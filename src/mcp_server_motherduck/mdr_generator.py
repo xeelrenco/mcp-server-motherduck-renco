@@ -412,6 +412,7 @@ class GeneratorService:
             "finished_label": _fmt_dt(run.get("finished_at")),
             "start_label": _fmt_date(run.get("project_start_date")) if run.get("project_start_date") else "",
             "created_by": run.get("created_by"),
+            "name": run.get("name") or "",
             "error": run.get("error"),
             "error_hint": _explain_failure(run) if state == "failed" else None,
             "sow_files": run.get("sow_files") or [],
@@ -501,7 +502,13 @@ class GeneratorService:
             out.append(safe)
         return out
 
-    def prepare_upload(self, project_code: str, start_date: str, files: List[Tuple[str, int]], user: str = "") -> Dict:
+    @staticmethod
+    def _clean_name(name: str) -> str:
+        """Nome facoltativo scelto dall'utente: una riga, senza caratteri di controllo, al massimo 60 caratteri."""
+        return " ".join("".join(ch for ch in str(name or "") if ch.isprintable()).split())[:60]
+
+    def prepare_upload(self, project_code: str, start_date: str, files: List[Tuple[str, int]], user: str = "",
+                       name: str = "") -> Dict:
         project_code, start_date = project_code.strip(), start_date.strip()
         error = self._check(project_code, start_date, files)
         if error:
@@ -509,11 +516,12 @@ class GeneratorService:
         job_id = new_job_id(project_code)
         names = self._safe_names([n for n, _ in files])
         uploads = []
-        for name, (original, size) in zip(names, files):
-            uploads.append({"name": name, "original": original, "size": size,
-                            "url": self.b.signed_put_url(f"jobs/{job_id}/input/{name}", "application/pdf")})
+        for safe, (original, size) in zip(names, files):  # (non riusare "name": è il nome scelto dall'utente)
+            uploads.append({"name": safe, "original": original, "size": size,
+                            "url": self.b.signed_put_url(f"jobs/{job_id}/input/{safe}", "application/pdf")})
         self.b.write_json(f"jobs/{job_id}/pending.json", {
             "project_code": project_code, "start_date": start_date, "user": user, "created_at": _now_iso(),
+            "name": self._clean_name(name),
             "files": [{"name": u["name"], "size": u["size"]} for u in uploads],
         })
         return {"job_id": job_id, "uploads": uploads}
@@ -540,12 +548,12 @@ class GeneratorService:
             self.b.delete_prefix(f"jobs/{job_id}/")
             raise ValueError(error)
         view = self._launch(job_id, pending["project_code"], pending.get("start_date") or "", names,
-                            user or pending.get("user", ""))
+                            user or pending.get("user", ""), name=pending.get("name") or "")
         self.b.delete_key(f"jobs/{job_id}/pending.json")
         return view
 
     def _launch(self, job_id: str, project_code: str, start_date: str, names: List[str], user: str,
-                retry_of: Optional[str] = None) -> Dict:
+                retry_of: Optional[str] = None, name: str = "") -> Dict:
         """Scrive lo stato iniziale e avvia il motore (i SoW sono già nel bucket)."""
         status = {
             "job_id": job_id, "project_code": project_code,
@@ -554,6 +562,8 @@ class GeneratorService:
             "created_at": _now_iso(), "updated_at": _now_iso(),
             "created_by": user, "sow_files": sorted(names),
         }
+        if name:
+            status["name"] = name
         if retry_of:
             status["retry_of"] = retry_of
         self.b.write_json(status_key(job_id), status)
@@ -602,7 +612,33 @@ class GeneratorService:
         for name in names:
             self.b.copy(f"jobs/{job_id}/input/{name}", f"jobs/{new_id}/input/{name}")
         return self._launch(new_id, run.get("project_code", ""), run.get("project_start_date") or "",
-                            names, user, retry_of=job_id)
+                            names, user, retry_of=job_id, name=run.get("name") or "")
+
+    def rename(self, job_id: str, name: str) -> Dict:
+        """Cambia il nome di una generazione conclusa (durante l'esecuzione il motore riscrive lo stato)."""
+        run = self.get(job_id)
+        if run.get("state") in ACTIVE_STATES:
+            raise ValueError("La generazione è in corso: rinominala quando è finita.")
+        clean = self._clean_name(name)
+        if clean:
+            run["name"] = clean
+        else:
+            run.pop("name", None)
+        self.b.write_json(status_key(job_id), run)
+        self._final.pop(job_id, None)
+        return self.view(run)
+
+    def existing(self, project_code: str) -> Dict:
+        """Generazioni già presenti per lo stesso codice progetto (escluse annullate e fallite)."""
+        code = (project_code or "").strip().lower()
+        ids = [i for i in self.b.list_job_ids() if "-".join(i.split("-")[2:-1]).lower() == code][:5] if code else []
+        out: List[Dict] = []
+        for run in ThreadPoolExecutor(max_workers=5).map(self._load, ids):
+            if run and run.get("state") in ACTIVE_STATES | {"succeeded"}:
+                v = self.view(run)
+                out.append({"job_id": v["job_id"], "state": v["state"], "state_label": v["state_label"],
+                            "created_label": v["created_label"], "name": v["name"]})
+        return {"esistenti": out}
 
     def cancel(self, job_id: str, user: str = "") -> Dict:
         run = self.get(job_id)
@@ -778,9 +814,20 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
 
     @mcp.tool(name="mdr_prepara_upload", title="Prepara caricamento", description="Usato solo dal pannello.",
               annotations=write_hints, meta=app_only)
-    async def mdr_prepara_upload(project_code: str, start_date: str = "", files: Optional[List[dict]] = None) -> dict:
+    async def mdr_prepara_upload(project_code: str, start_date: str = "", files: Optional[List[dict]] = None,
+                                 name: str = "") -> dict:
         parsed = [(str(f.get("name", "")), int(f.get("size") or 0)) for f in (files or [])]
-        return await run(svc.prepare_upload, project_code, start_date, parsed, "gemini")
+        return await run(svc.prepare_upload, project_code, start_date, parsed, "gemini", name)
+
+    @mcp.tool(name="mdr_esistenti", title="Generazioni dello stesso progetto", description="Usato solo dal pannello.",
+              annotations=read_hints, meta=app_only)
+    async def mdr_esistenti(project_code: str) -> dict:
+        return await run(svc.existing, project_code[:40])
+
+    @mcp.tool(name="mdr_rinomina", title="Rinomina generazione", description="Usato solo dal pannello.",
+              annotations=write_hints, meta=app_only)
+    async def mdr_rinomina(job_id: str, name: str = "") -> dict:
+        return await run(svc.rename, job_id, name)
 
     @mcp.tool(name="mdr_avvia", title="Avvia generazione", description="Usato solo dal pannello.",
               annotations=write_hints, meta=app_only)

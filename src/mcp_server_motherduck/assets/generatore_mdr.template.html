@@ -97,6 +97,8 @@
 <section id="v-new">
   <label for="code">Codice progetto</label>
   <input type="text" id="code" maxlength="40" placeholder="es. 5890" autocomplete="off">
+  <label for="nm">Nome della generazione (facoltativo)</label>
+  <input type="text" id="nm" maxlength="60" placeholder="es. Progetto 8001 – revisione giugno" autocomplete="off">
   <label for="sd">Data di inizio progetto (facoltativa)</label>
   <div class="dp"><input type="text" id="sd" inputmode="numeric" maxlength="10" placeholder="gg/mm/aaaa" autocomplete="off" style="max-width:150px">
     <button type="button" class="sec" id="sdbtn" title="Scegli dal calendario" aria-label="Scegli dal calendario"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg></button>
@@ -120,10 +122,16 @@
     <button class="danger hide" id="delsel" disabled>Elimina</button>
   </div>
   <div class="bar2 filters">
-    <input type="text" id="fq" maxlength="40" placeholder="Cerca codice progetto" aria-label="Cerca codice progetto" autocomplete="off">
+    <input type="text" id="fq" maxlength="40" placeholder="Cerca codice o nome" aria-label="Cerca codice o nome" autocomplete="off">
     <select id="fs" aria-label="Filtra per stato">
       <option value="">Tutti gli stati</option><option value="active">In corso</option><option value="succeeded">Completati</option>
       <option value="failed">In errore</option><option value="cancelled">Annullati</option>
+    </select>
+    <select id="fd" aria-label="Filtra per data">
+      <option value="">Tutte le date</option><option value="today">Oggi</option><option value="7">Ultimi 7 giorni</option><option value="30">Ultimi 30 giorni</option>
+    </select>
+    <select id="fo" aria-label="Ordina">
+      <option value="new">Più recenti prima</option><option value="old">Meno recenti prima</option>
     </select>
     <button class="sec hide" id="fclear">Azzera filtri</button>
   </div>
@@ -201,15 +209,35 @@
   function renderFiles() {
     var ul = $("files"); ul.textContent = "";
     files.forEach(function (f, i) {
-      var li = el("li"); li.appendChild(el("span", "n", f.name)); li.appendChild(el("span", "s", mb(f.size)));
+      var li = el("li"); li.appendChild(el("span", "n", f.name));
+      li.appendChild(el("span", "s", mb(f.size) + (f.pages ? " · " + f.pages + (f.pages === 1 ? " pagina" : " pagine") : "")));
+      if (f.bad) { var bw = el("span", "s", "non è un PDF valido"); bw.style.color = "var(--err)"; li.appendChild(bw); }
       var x = el("button", "x", "×"); x.title = "Rimuovi"; x.onclick = function () { if (!busy) { files.splice(i, 1); renderFiles(); } };
       li.appendChild(x); ul.appendChild(li);
     });
     var tot = files.reduce(function (a, f) { return a + f.size; }, 0), code = $("code").value.trim();
-    $("tot").textContent = files.length ? files.length + (files.length === 1 ? " file · " : " file · ") + mb(tot) + " su " + MAXT + " MB" : "";
-    $("go").disabled = cfgError || busy || !files.length || !code;
+    var known = files.length && files.every(function (f) { return f.pages; }), pg = files.reduce(function (a, f) { return a + (f.pages || 0); }, 0);
+    $("tot").textContent = files.length ? files.length + " file · " + mb(tot) + " su " + MAXT + " MB" + (known ? " · " + pg + " pagine" : "") : "";
+    $("go").disabled = cfgError || busy || !files.length || !code || files.some(function (f) { return f.bad; });
     $("hint").textContent = (cfgError || busy || (files.length && code)) ? "" :
       (!code && !files.length ? "Inserisci il codice progetto e carica almeno un PDF." : !code ? "Inserisci il codice progetto." : "Carica almeno un PDF.");
+  }
+  function readPages(f) { // numero di pagine e controllo che sia un PDF (alla meglio: alcuni PDF compressi non lo rivelano)
+    if (f.pages !== undefined) return; f.pages = null;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var s = String(rd.result);
+        if (s.slice(0, 5) !== "%PDF-") f.bad = true;
+        var n = 0, re = /<<[^<>]*?\/Type\s*\/Pages[^<>]*?>>/g, m, c;
+        while ((m = re.exec(s))) { c = /\/Count\s+(\d+)/.exec(m[0]); if (c && +c[1] > n) n = +c[1]; }
+        if (!n) { var pm = s.match(/\/Type\s*\/Page(?![a-zA-Z])/g); n = pm ? pm.length : 0; }
+        f.pages = n || null;
+      } catch (x) { f.pages = null; }
+      renderFiles();
+    };
+    rd.onerror = function () { renderFiles(); };
+    rd.readAsBinaryString(f);
   }
   function addFiles(list) {
     var msgs = [];
@@ -217,7 +245,7 @@
       if (!/\.pdf$/i.test(f.name)) { msgs.push("'" + f.name + "' non è un PDF."); return; }
       if (f.size > MAXF * 1048576) { msgs.push("'" + f.name + "' supera " + MAXF + " MB."); return; }
       if (files.some(function (g) { return g.name === f.name && g.size === f.size; })) return;
-      files.push(f);
+      files.push(f); readPages(f);
     });
     var tot = files.reduce(function (a, f) { return a + f.size; }, 0);
     if (tot > MAXT * 1048576) { msgs.push("Totale oltre " + MAXT + " MB."); }
@@ -229,7 +257,8 @@
   $("drop").ondragover = function (e) { e.preventDefault(); this.classList.add("over"); };
   $("drop").ondragleave = function () { this.classList.remove("over"); };
   $("drop").ondrop = function (e) { e.preventDefault(); this.classList.remove("over"); addFiles(e.dataTransfer.files); };
-  $("code").oninput = renderFiles;
+  var dupFor = "";
+  $("code").oninput = function () { dupFor = ""; $("go").textContent = "Avvia generazione"; renderFiles(); };
 
   function put(url, file) {
     return fetch(url, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file }).then(function (r) {
@@ -288,11 +317,24 @@
   $("go").onclick = function () {
     if (busy) return;
     var sdv = sdIso(); if (sdv === null) { $("sdmsg").textContent = "Data non valida: usa gg/mm/aaaa (es. 15/03/2026)."; $("sd").focus(); return; }
+    var code0 = $("code").value.trim();
+    if (dupFor !== code0) { // prima di spendere crediti: c'è già una generazione per questo progetto?
+      busy = true; renderFiles(); say($("newmsg"), "Controllo se esiste già una generazione…");
+      call("mdr_esistenti", { project_code: code0 }).then(function (d) {
+        busy = false; renderFiles(); dupFor = code0;
+        var ex = (d && d.esistenti) || [];
+        if (!ex.length) { say($("newmsg"), ""); $("go").onclick(); return; }
+        var e0 = ex[0];
+        say($("newmsg"), "Per il progetto " + code0 + " esiste già una generazione (" + (e0.state === "succeeded" ? "completata" : "in corso") + ", " + relLabel(e0.created_label) + (e0.name ? ", «" + e0.name + "»" : "") + (ex.length > 1 ? ", e altre " + (ex.length - 1) : "") + "). Se continui ne parte un'altra e consuma altri crediti dei modelli.");
+        $("go").textContent = "Avvia comunque";
+      }).catch(function () { busy = false; renderFiles(); dupFor = code0; $("go").onclick(); });
+      return;
+    }
     busy = true; renderFiles();
     var box = $("newmsg"), job = null;
     say(box, "Preparo il caricamento…");
     call("mdr_prepara_upload", {
-      project_code: $("code").value.trim(), start_date: sdv,
+      project_code: $("code").value.trim(), start_date: sdv, name: $("nm").value.trim(),
       files: files.map(function (f) { return { name: f.name, size: f.size }; })
     }).then(function (p) {
       job = p.job_id;
@@ -304,7 +346,7 @@
       say(box, "Avvio la generazione…");
       return call("mdr_avvia", { job_id: job });
     }).then(function (run) {
-      files = []; busy = false; renderFiles(); say(box, "");
+      files = []; busy = false; dupFor = ""; $("nm").value = ""; $("go").textContent = "Avvia generazione"; renderFiles(); say(box, "");
       runs[run.job_id] = run; if (cache) { cache.runs.unshift(run); cache.at = 0; }
       curJob = run.job_id; show("det");
     }).catch(function (e) {
@@ -313,6 +355,12 @@
   };
 
   // ---- elenco
+  // "13/10/2026 16:22" (ora di Roma, già calcolata dal server) -> oggi/ieri, chiave di ordinamento, giorni trascorsi
+  function parseLabel(l) { var m = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/.exec(l || ""); return m ? { d: +m[1], mo: +m[2], y: +m[3], h: m[4], mi: m[5] } : null; }
+  function romeToday() { var p = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-"); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5; }
+  function ageDays(l) { var p = parseLabel(l); return p ? Math.round(romeToday() - Date.UTC(p.y, p.mo - 1, p.d) / 864e5) : null; }
+  function relLabel(l) { var a = ageDays(l), p = parseLabel(l); if (a === 0) return "oggi " + p.h + ":" + p.mi; if (a === 1) return "ieri " + p.h + ":" + p.mi; return l || "-"; }
+  function labelKey(l) { var p = parseLabel(l); return p ? ((p.y * 100 + p.mo) * 100 + p.d) * 10000 + (+p.h) * 100 + (+p.mi) : 0; }
   function badge(run) { return el("span", "st " + run.state, run.state_label); }
   function skel(w, h) { var d = el("div", "sk"); d.style.width = w; d.style.height = h; return d; }
   function skelList(box) {
@@ -330,7 +378,7 @@
     for (var i = 0; i < 4; i++) { var l = skel(60 + i * 8 + "%", "12px"); l.style.marginBottom = "8px"; box.appendChild(l); }
     var act = el("div", "actions"); act.appendChild(skel("110px", "30px")); act.appendChild(skel("150px", "30px")); act.appendChild(skel("60px", "30px")); box.appendChild(act);
   }
-  var runs = {}, currentRuns = [], currentMore = false, fq = "", fs = "", flimit = 10, loadTok = 0;
+  var fdate = "", forder = "new", runs = {}, currentRuns = [], currentMore = false, fq = "", fs = "", flimit = 10, loadTok = 0;
   var selecting = false, picked = {};
   function pickedIds() { return Object.keys(picked).filter(function (k) { return picked[k]; }); }
   function updateSel() {
@@ -360,7 +408,7 @@
     currentRuns = d.runs; currentMore = d.altri;
     var box = $("list"); box.textContent = "";
     if (!d.runs.length) {
-      var em = el("div", "empty"), filt = !!(fq || fs);
+      var em = el("div", "empty"), filt = !!(fq || fs || fdate);
       em.appendChild(el("div", "", filt ? "Nessuna generazione corrisponde ai filtri." : "Non c'è ancora nessuna generazione."));
       var eb = el("button", "sec", filt ? "Azzera filtri" : "Nuova generazione");
       eb.onclick = function () { if (filt) $("fclear").onclick(); else show("new"); };
@@ -374,8 +422,8 @@
         k.onclick = function (e) { e.stopPropagation(); picked[r.job_id] = k.checked; updateSel(); };
         row.appendChild(k);
       }
-      row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
-      c.appendChild(el("div", "muted", r.created_label + (r.active ? " · " + (r.step_label || "") : "")));
+      row.appendChild(el("span", "name", r.name || "Progetto " + r.project_code)); row.appendChild(badge(r)); c.appendChild(row);
+      c.appendChild(el("div", "muted", (r.name ? "Progetto " + r.project_code + " · " : "") + relLabel(r.created_label) + (r.active ? " · " + (r.step_label || "") : "")));
       if (r.active) { var pb = el("div", "bar"), pi = el("i"); pi.style.width = r.progress + "%"; pb.appendChild(pi); c.appendChild(pb); }
       else if (r.state === "succeeded" && sumText(r)) c.appendChild(el("div", "muted sub", sumText(r)));
       c.onclick = function () {
@@ -417,13 +465,14 @@
   var cache = null, loadTok = 0, refreshing = false, ltimer = null;
   function matches(r) {
     var q = fq.toLowerCase();
-    if (q && String(r.project_code || "").toLowerCase().indexOf(q) < 0) return false;
+    if (q && (String(r.project_code || "") + " " + String(r.name || "")).toLowerCase().indexOf(q) < 0) return false;
+    if (fdate) { var a = ageDays(r.created_label); if (a === null) return false; if (fdate === "today" ? a > 0 : a > (+fdate - 1)) return false; }
     if (fs === "active") return !!r.active;
     return !fs || r.state === fs;
   }
   function drawList() {
     if (!cache) return;
-    var all = cache.runs.filter(matches), shown = all.slice(0, flimit);
+    var all = cache.runs.filter(matches).sort(function (x, y) { return (labelKey(y.created_label) - labelKey(x.created_label)) * (forder === "old" ? -1 : 1); }), shown = all.slice(0, flimit);
     renderList({ runs: shown, altri: all.length > shown.length });
     tabCount();
     var t = new Date(cache.at), hh = ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
@@ -451,14 +500,14 @@
   }
   var ftimer = null;
   function filtersChanged() {
-    fq = $("fq").value.trim(); fs = $("fs").value; flimit = 10; picked = {};
-    $("fclear").classList.toggle("hide", !(fq || fs));
+    fq = $("fq").value.trim(); fs = $("fs").value; fdate = $("fd").value; forder = $("fo").value; flimit = 10; picked = {};
+    $("fclear").classList.toggle("hide", !(fq || fs || fdate || forder !== "new"));
     drawList();
   }
   $("fq").oninput = filtersChanged;
   $("fq").onkeydown = function (e) { if (e.key === "Enter") { clearTimeout(ftimer); filtersChanged(); } };
-  $("fs").onchange = filtersChanged;
-  $("fclear").onclick = function () { $("fq").value = ""; $("fs").value = ""; filtersChanged(); };
+  $("fs").onchange = $("fd").onchange = $("fo").onchange = filtersChanged;
+  $("fclear").onclick = function () { $("fq").value = ""; $("fs").value = ""; $("fd").value = ""; $("fo").value = "new"; filtersChanged(); };
   $("refresh").onclick = function () { loadList(true); };
   $("back").onclick = function () { show("list"); };
 
@@ -522,14 +571,15 @@
   }
   function drawDet(r, loading) {
     var box = $("det"); box.textContent = "";
-    var row = el("div", "row"); row.appendChild(el("span", "name", "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
+    var row = el("div", "row"); row.appendChild(el("span", "name", r.name || "Progetto " + r.project_code)); row.appendChild(badge(r)); box.appendChild(row);
+    if (r.name) box.appendChild(el("div", "muted", "Progetto " + r.project_code));
     if (r.active) {
       var bar = el("div", "bar"), i = el("i"); i.style.width = r.progress + "%"; bar.appendChild(i); box.appendChild(bar);
       box.appendChild(el("div", "muted", (r.step_label || "") + " · " + r.progress + "%"));
     }
     var d = el("dl");
-    d.appendChild(dl("Avviata", r.created_label || "-"));
-    if (r.finished_label) d.appendChild(dl("Terminata", r.finished_label));
+    d.appendChild(dl("Avviata", relLabel(r.created_label)));
+    if (r.finished_label) d.appendChild(dl("Terminata", relLabel(r.finished_label)));
     if (r.start_label) d.appendChild(dl("Inizio progetto", r.start_label));
     if (r.sow_files.length) d.appendChild(dl("SoW", r.sow_files.join(", ")));
     if (r.summary && typeof r.summary === "object") Object.keys(r.summary).forEach(function (k) {
@@ -578,6 +628,20 @@
       }; ops.appendChild(br);
     }
     if (!r.active) {
+      var bn = el("button", "sec", "Rinomina");
+      bn.onclick = function () {
+        var m = $("detmsg"); m.textContent = ""; var w = el("div", "msg"), inp = el("input"), sv = el("button", "", "Salva");
+        inp.type = "text"; inp.maxLength = 60; inp.value = r.name || ""; inp.placeholder = "Nome della generazione"; inp.style.cssText = "max-width:260px;margin-right:6px";
+        var go = function () {
+          sv.disabled = true;
+          call("mdr_rinomina", { job_id: r.job_id, name: inp.value }).then(function (n) {
+            runs[n.job_id] = n; if (cache) { var ix = cache.runs.findIndex(function (x) { return x.job_id === n.job_id; }); if (ix >= 0) cache.runs[ix] = n; }
+            drawDet(n);
+          }).catch(function (e) { sv.disabled = false; say($("detmsg"), String(e.message || e), "err"); });
+        };
+        sv.onclick = go; inp.onkeydown = function (e) { if (e.key === "Enter") go(); };
+        w.appendChild(inp); w.appendChild(sv); m.appendChild(w); inp.focus();
+      }; ops.appendChild(bn);
       var bd = el("button", "danger", "Elimina");
       bd.onclick = function () {
         confirmDelete(bd, [r.job_id], function () { return "Elimina"; }, function (res) { if (cache) cache.runs = cache.runs.filter(function (r) { return res.eliminati.indexOf(r.job_id) < 0; }); show("list"); });
