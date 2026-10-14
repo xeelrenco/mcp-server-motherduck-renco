@@ -63,6 +63,18 @@
   .cal .g button.out { color:var(--muted); opacity:.45; } .cal .g button.we { color:var(--muted); }
   .cal .g button.today { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--accent); font-weight:700; }
   .cal .g button.sel { background:var(--accent); color:#fff; box-shadow:none; font-weight:700; opacity:1; }
+  body { position:relative; }
+  #pv { position:absolute; left:0; top:0; right:0; bottom:0; z-index:300; background:var(--bg); display:flex; flex-direction:column; }
+  #pv .ph { display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  #pv .tt { flex:1; min-width:140px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #pv .pn { display:flex; align-items:center; gap:5px; font-size:13px; color:var(--muted); }
+  #pv .pn input { width:52px; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit; text-align:center; }
+  #pv .ph button { padding:4px 10px; min-width:32px; }
+  #pv .pb { position:relative; flex:1; overflow:auto; background:var(--soft); padding:12px; outline:0; }
+  #pv .pg { margin:0 auto 12px; background:#fff; box-shadow:0 1px 6px rgba(0,0,0,.28); position:relative; }
+  #pv .pg canvas { display:block; width:100%; height:100%; }
+  #pv .pm { padding:30px 10px; text-align:center; color:var(--muted); }
+  button.ico { padding:6px 8px; line-height:0; }
   :root { --c2:#0f8b8d; }
   @media (prefers-color-scheme: dark) { :root { --c2:#3fc1c3; } }
   .dg { margin:12px 0 4px; }
@@ -254,6 +266,9 @@
       var li = el("li"); li.appendChild(el("span", "n", f.name));
       li.appendChild(el("span", "s", mb(f.size) + (f.pages ? " · " + f.pages + (f.pages === 1 ? " pagina" : " pagine") : "")));
       if (f.bad) { var bw = el("span", "s", "non è un PDF valido"); bw.style.color = "var(--err)"; li.appendChild(bw); }
+      var pb = el("button", "sec ico", ""); pb.type = "button"; pb.innerHTML = EYE; pb.title = "Anteprima rapida"; pb.setAttribute("aria-label", "Anteprima di " + f.name);
+      pb.onclick = function () { openPreview(f.name, function () { return f.arrayBuffer ? f.arrayBuffer() : new Promise(function (ok, no) { var rd = new FileReader(); rd.onload = function () { ok(rd.result); }; rd.onerror = no; rd.readAsArrayBuffer(f); }); }, ""); };
+      if (!f.bad) li.appendChild(pb);
       var x = el("button", "x", "×"); x.title = "Rimuovi"; x.onclick = function () { if (!busy) { files.splice(i, 1); renderFiles(); } };
       li.appendChild(x); ul.appendChild(li);
     });
@@ -738,6 +753,103 @@
     if (typeof sm["Durata (minuti)"] === "number") box.appendChild(el("div", "foot", "Generato in " + Math.max(1, Math.round(sm["Durata (minuti)"])) + " min"));
     return box;
   }
+  // ---- anteprima dei PDF dentro il pannello (pdf.js incluso nella pagina: nessuna rete esterna, caricato solo al primo uso)
+  var EYE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var pv = { token: 0, doc: null, zoom: 1, ratio: 1.414, obs: null }, pdfReady = null;
+  function loadPdfJs() {
+    if (pdfReady) return pdfReady;
+    pdfReady = new Promise(function (ok, no) {
+      try {
+        ["pdfjs-lib", "pdfjs-worker"].forEach(function (id) { var s = document.createElement("script"); s.textContent = $(id).textContent; document.head.appendChild(s); });
+        window.pdfjsWorker = window["pdfjs-dist/build/pdf.worker"];
+        var lib = window.pdfjsLib || window["pdfjs-dist/build/pdf"];
+        if (!lib || !window.pdfjsWorker || !window.pdfjsWorker.WorkerMessageHandler) throw new Error("libreria non disponibile");
+        ok(lib);
+      } catch (e) { pdfReady = null; no(e); }
+    });
+    return pdfReady;
+  }
+  function closePreview() {
+    var o = $("pv"); if (!o) return;
+    pv.token++; if (pv.obs) { pv.obs.disconnect(); pv.obs = null; }
+    if (pv.doc) { try { pv.doc.destroy(); } catch (x) {} pv.doc = null; }
+    o.remove(); document.body.style.minHeight = "";
+  }
+  function freshLink(kind, name) { // link di download ancora valido (altrimenti se ne chiede uno nuovo)
+    var l = linkFor(kind, name);
+    if (l && Date.now() - linksAt < 9 * 60 * 1000) return Promise.resolve(l);
+    return fetchLinks(curJob).then(function () { var n = linkFor(kind, name); if (!n) throw new Error("link non disponibile"); return n; });
+  }
+  function openPreview(title, getBytes, url) {
+    closePreview();
+    var tok = ++pv.token; pv.zoom = 1; pv.doc = null;
+    var o = el("div"); o.id = "pv";
+    var ph = el("div", "ph"), tt = el("span", "tt", title); tt.title = title; ph.appendChild(tt);
+    var pn = el("span", "pn"), inp = el("input"); inp.type = "number"; inp.min = "1"; inp.value = "1"; inp.setAttribute("aria-label", "Vai a pagina");
+    var tot = el("span", "", "/ -"); pn.appendChild(inp); pn.appendChild(tot); ph.appendChild(pn);
+    function btn(txt, tip, cls) { var b = el("button", cls || "sec", txt); b.type = "button"; b.title = tip; b.setAttribute("aria-label", tip); ph.appendChild(b); return b; }
+    var zo = btn("−", "Riduci"), zi = btn("+", "Ingrandisci"), zf = btn("Adatta", "Adatta alla larghezza"), cl = btn("Chiudi (Esc)", "Chiudi l'anteprima", "");
+    var box = el("div", "pb"); box.tabIndex = -1;
+    o.appendChild(ph); o.appendChild(box); document.body.appendChild(o); document.body.style.minHeight = "780px";
+    var pages = [], epoch = 0;
+    cl.onclick = closePreview;
+    function msg(t, err) { box.textContent = ""; var m = el("div", "pm", t); if (err && url) { var b = el("button", "sec", "Apri il file"); b.style.marginLeft = "8px"; b.onclick = function () { app.openLink({ url: url }).catch(function () {}); }; m.appendChild(b); } box.appendChild(m); }
+    msg("Carico l'anteprima…");
+    function layout() {
+      epoch++; if (pv.obs) pv.obs.disconnect(); box.textContent = ""; pages = [];
+      var w = Math.max(220, box.clientWidth - 26) * pv.zoom, my = epoch;
+      pv.obs = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { var p = pages[+e.target.dataset.i]; if (e.isIntersecting) renderPage(p, w, my); else release(p); });
+      }, { root: box, rootMargin: "1200px 0px" });
+      for (var i = 0; i < pv.doc.numPages; i++) {
+        var d = el("div", "pg"); d.dataset.i = String(i); d.style.width = w + "px"; d.style.height = Math.round(w * pv.ratio) + "px";
+        var p = { el: d, n: i + 1, done: false, busy: false }; pages.push(p); box.appendChild(d); pv.obs.observe(d);
+      }
+    }
+    function release(p) { if (!p.done) return; p.done = false; p.el.textContent = ""; }
+    function renderPage(p, w, my) {
+      if (p.done || p.busy) return; p.busy = true;
+      pv.doc.getPage(p.n).then(function (page) {
+        if (my !== epoch || tok !== pv.token) { p.busy = false; return; }
+        var v1 = page.getViewport({ scale: 1 }), dpr = Math.min(2, window.devicePixelRatio || 1), v = page.getViewport({ scale: (w * dpr) / v1.width });
+        var c = document.createElement("canvas"); c.width = Math.floor(v.width); c.height = Math.floor(v.height);
+        p.el.style.height = Math.round(w * v1.height / v1.width) + "px";
+        return page.render({ canvasContext: c.getContext("2d"), viewport: v }).promise.then(function () {
+          if (my !== epoch || tok !== pv.token) { p.busy = false; return; }
+          p.el.textContent = ""; p.el.appendChild(c); p.done = true; p.busy = false;
+        });
+      }).catch(function () { p.busy = false; });
+    }
+    var raf = 0;
+    box.onscroll = function () {
+      if (raf) return; raf = requestAnimationFrame(function () {
+        raf = 0; var y = box.scrollTop + 20, cur = 1;
+        for (var i = 0; i < pages.length; i++) { if (pages[i].el.offsetTop <= y) cur = i + 1; else break; }
+        if (document.activeElement !== inp) inp.value = String(cur);
+      });
+    };
+    function go() { var n = Math.max(1, Math.min(pages.length, parseInt(inp.value, 10) || 1)); inp.value = String(n); if (pages[n - 1]) box.scrollTop = pages[n - 1].el.offsetTop - 10; }
+    inp.onchange = go; inp.onkeydown = function (e) { if (e.key === "Enter") { go(); box.focus(); } e.stopPropagation(); };
+    function zoomTo(z) { if (!pv.doc) return; var keep = Math.max(1, +inp.value || 1); pv.zoom = Math.max(0.5, Math.min(3, z)); layout(); inp.value = String(keep); go(); }
+    zo.onclick = function () { zoomTo(pv.zoom - 0.25); }; zi.onclick = function () { zoomTo(pv.zoom + 0.25); }; zf.onclick = function () { zoomTo(1); };
+    Promise.all([loadPdfJs(), Promise.resolve().then(getBytes)]).then(function (r) {
+      if (tok !== pv.token) return;
+      return r[0].getDocument({ data: new Uint8Array(r[1]), disableRange: true, disableStream: true, isEvalSupported: false }).promise;
+    }).then(function (doc) {
+      if (!doc) return; if (tok !== pv.token) { try { doc.destroy(); } catch (x) {} return; }
+      pv.doc = doc; tot.textContent = "/ " + doc.numPages; inp.max = String(doc.numPages);
+      return doc.getPage(1).then(function (p1) { var v = p1.getViewport({ scale: 1 }); pv.ratio = v.height / v.width; layout(); box.focus(); });
+    }).catch(function (e) { if (tok === pv.token) msg("Anteprima non disponibile (" + String((e && e.message) || e).slice(0, 80) + "). Puoi comunque scaricare il file.", true); });
+  }
+  function previewBtn(name) { // anteprima di un SoW già caricato
+    var b = el("button", "sec ico", ""); b.type = "button"; b.innerHTML = EYE; b.title = "Anteprima rapida di " + name; b.setAttribute("aria-label", "Anteprima di " + name);
+    b.onclick = function () {
+      freshLink("sow", name).then(function (l) {
+        openPreview(name, function () { return fetch(l.url).then(function (res) { if (!res.ok) throw new Error("download " + res.status); return res.arrayBuffer(); }); }, l.url);
+      }).catch(function (e) { var dm = $("detmsg"); if (dm) say(dm, "Anteprima non disponibile: " + String((e && e.message) || e), "err"); });
+    };
+    return b;
+  }
   var tlOpen = false;
   function fmtSec(s) { return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + pad2(s % 60) + " s"; }
   function timeline(r) { // i passi: fatti, in corso, da fare, con il tempo impiegato (e una barretta in proporzione)
@@ -803,7 +915,7 @@
     var a = el("div", "actions"), fl = el("div", "actions files"), ops = el("div", "ops");
     if (r.has_mdr) { a.appendChild(makeLink("Scarica MDR", "mdr", "", "")); a.appendChild(copyBtn("mdr", "", "Copia link")); }
     if (!r.active) { fl.appendChild(makeLink("Log", "log", "", "sec")); }
-    r.sow_files.forEach(function (n) { fl.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); });
+    r.sow_files.forEach(function (n) { fl.appendChild(makeLink("SoW: " + n, "sow", n, "sec")); fl.appendChild(previewBtn(n)); });
     if (!r.active && r.sow_files.length) {
       var lbl = r.state === "failed" ? "Riprova con gli stessi file" : "Rilancia con gli stessi file";
       var br = el("button", r.state === "failed" ? "" : "sec", lbl);
@@ -908,6 +1020,7 @@
   }
   document.addEventListener("keydown", function (e) { // Esc: chiude prima i calendari aperti, poi torna alla vista normale
     if (e.key !== "Escape") return;
+    if ($("pv")) { closePreview(); return; }
     if (!$("rcal").classList.contains("hide")) { closeRcal(); return; }
     if (!$("cal").classList.contains("hide")) { $("cal").classList.add("hide"); return; }
     exitZoom();
@@ -917,5 +1030,7 @@
   renderFiles();
 })();
 </script>
+<script type="text/plain" id="pdfjs-lib">/*__PDFJS_LIB__*/</script>
+<script type="text/plain" id="pdfjs-worker">/*__PDFJS_WORKER__*/</script>
 </body>
 </html>
