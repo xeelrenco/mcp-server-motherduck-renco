@@ -47,14 +47,19 @@
   .muted { color:var(--muted); font-size:12px; }
   .dp { position:relative; display:flex; gap:6px; align-items:center; }
   .dp button { padding:6px 9px; line-height:0; }
-  .cal { position:absolute; top:100%; left:0; margin-top:4px; z-index:40; width:252px; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.2); }
-  .cal .h { display:flex; align-items:center; gap:6px; margin-bottom:6px; } .cal .h b { flex:1; text-align:center; font-size:13px; text-transform:capitalize; }
-  .cal .h button { padding:3px 9px; line-height:1.2; }
-  .cal .g { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; text-align:center; }
-  .cal .g span { font-size:11px; color:var(--muted); padding:3px 0; }
-  .cal .g button { background:none; color:var(--text); padding:6px 0; font-size:13px; border-radius:6px; font-weight:500; }
-  .cal .g button:hover { background:var(--soft); } .cal .g button.sel { background:var(--accent); color:#fff; } .cal .g button.today { border:1px solid var(--accent); }
-  .cal .f { margin-top:6px; text-align:right; }
+  .cal { position:absolute; top:100%; left:0; margin-top:6px; z-index:40; width:288px; padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 10px 28px rgba(0,0,0,.22); }
+  .cal .h { display:flex; align-items:center; gap:6px; margin-bottom:8px; } .cal .h b { flex:1; text-align:center; font-size:14px; text-transform:capitalize; }
+  .cal .h button { width:30px; height:30px; padding:0; border-radius:50%; font-size:18px; line-height:1; background:none; border:0; color:var(--muted); }
+  .cal .h button:hover { background:var(--soft); color:var(--text); }
+  .cal .g { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:34px; gap:2px; text-align:center; align-items:center; }
+  .cal .g .w { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; }
+  .cal .g button { width:34px; height:34px; margin:0 auto; padding:0; background:none; color:var(--text); font-size:13px; font-weight:500; border:0; border-radius:50%; }
+  .cal .g button:hover { background:var(--soft); }
+  .cal .g button.out { color:var(--muted); opacity:.45; } .cal .g button.we { color:var(--muted); }
+  .cal .g button.today { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--accent); font-weight:700; }
+  .cal .g button.sel { background:var(--accent); color:#fff; box-shadow:none; font-weight:700; opacity:1; }
+  .cal .f { display:flex; justify-content:space-between; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }
+  .cal .f button { background:none; border:0; color:var(--accent); font-weight:600; font-size:13px; padding:4px 8px; }
   #toasts { position:fixed; top:8px; left:12px; right:12px; z-index:50; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
   .toast { pointer-events:auto; display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:8px; font-size:13px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,.18); border:1px solid var(--line); background:var(--ok-bg); color:var(--ok); cursor:pointer; }
   .toast.bad { background:var(--err-bg); color:var(--err); } .toast.neu { background:var(--soft); color:var(--muted); } .toast span { flex:1; } .toast i { font-style:normal; opacity:.7; }
@@ -247,27 +252,30 @@
   // calendario (scritto a mano: il selettore nativo non è sempre disponibile dentro la chat)
   var calY = 0, calM = 0, MESI = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
   function pad2(n) { return ("0" + n).slice(-2); }
+  function setSd(y, m, d) { $("sd").value = pad2(d) + "/" + pad2(m + 1) + "/" + y; $("sd")._len = 10; $("sdmsg").textContent = ""; $("cal").classList.add("hide"); }
   function drawCal() {
     var c = $("cal"); c.textContent = "";
-    var h = el("div", "h"), pv = el("button", "sec", "‹"), nx = el("button", "sec", "›");
+    var h = el("div", "h"), pv = el("button", "", "‹"), nx = el("button", "", "›");
     pv.type = nx.type = "button"; pv.title = "Mese precedente"; nx.title = "Mese successivo";
     pv.onclick = function () { calM--; if (calM < 0) { calM = 11; calY--; } drawCal(); };
     nx.onclick = function () { calM++; if (calM > 11) { calM = 0; calY++; } drawCal(); };
     h.appendChild(pv); h.appendChild(el("b", "", MESI[calM] + " " + calY)); h.appendChild(nx); c.appendChild(h);
-    var g = el("div", "g"); ["L","M","M","G","V","S","D"].forEach(function (d) { g.appendChild(el("span", "", d)); });
-    var first = (new Date(calY, calM, 1).getDay() + 6) % 7, days = new Date(calY, calM + 1, 0).getDate();
+    var g = el("div", "g"); ["lun","mar","mer","gio","ven","sab","dom"].forEach(function (d) { g.appendChild(el("span", "w", d)); });
+    var first = (new Date(calY, calM, 1).getDay() + 6) % 7; // sempre 6 settimane: l'altezza non cambia da un mese all'altro
     var cur = sdIso(), now = new Date(), todayIso = now.getFullYear() + "-" + pad2(now.getMonth() + 1) + "-" + pad2(now.getDate());
-    for (var i = 0; i < first; i++) g.appendChild(el("span"));
-    for (var d = 1; d <= days; d++) (function (d) {
-      var iso = calY + "-" + pad2(calM + 1) + "-" + pad2(d), b = el("button", (iso === cur ? "sel " : "") + (iso === todayIso ? "today" : ""), String(d));
-      b.type = "button";
-      b.onclick = function () { $("sd").value = pad2(d) + "/" + pad2(calM + 1) + "/" + calY; $("sd")._len = 10; $("sdmsg").textContent = ""; $("cal").classList.add("hide"); };
+    for (var i = 0; i < 42; i++) (function (i) {
+      var dt = new Date(calY, calM, 1 - first + i), y = dt.getFullYear(), m = dt.getMonth(), d = dt.getDate();
+      var iso = y + "-" + pad2(m + 1) + "-" + pad2(d), wd = i % 7;
+      var cls = (m !== calM ? "out " : "") + (wd >= 5 ? "we " : "") + (iso === todayIso ? "today " : "") + (iso === cur ? "sel" : "");
+      var b = el("button", cls.trim(), String(d)); b.type = "button";
+      b.onclick = function () { setSd(y, m, d); };
       g.appendChild(b);
-    })(d);
+    })(i);
     c.appendChild(g);
-    var f = el("div", "f"), cl = el("button", "sec", "Cancella"); cl.type = "button";
+    var f = el("div", "f"), tb = el("button", "", "Oggi"), cl = el("button", "", "Cancella"); tb.type = cl.type = "button";
+    tb.onclick = function () { setSd(now.getFullYear(), now.getMonth(), now.getDate()); };
     cl.onclick = function () { $("sd").value = ""; $("sd")._len = 0; $("sdmsg").textContent = ""; $("cal").classList.add("hide"); };
-    f.appendChild(cl); c.appendChild(f);
+    f.appendChild(tb); f.appendChild(cl); c.appendChild(f);
   }
   $("sdbtn").onclick = function (e) {
     e.stopPropagation();
