@@ -791,7 +791,7 @@
     var tot = el("span", "", "/ -"); pn.appendChild(inp); pn.appendChild(tot); ph.appendChild(pn);
     function btn(txt, tip, cls) { var b = el("button", cls || "sec", txt); b.type = "button"; b.title = tip; b.setAttribute("aria-label", tip); ph.appendChild(b); return b; }
     var zo = btn("−", "Riduci"), zi = btn("+", "Ingrandisci"), zf = btn("Adatta", "Adatta alla larghezza"), ez = btn("", "Ingrandisci", "sec ico"), cl = btn("Chiudi (Esc)", "Chiudi l'anteprima", "");
-    ez.id = "pvz"; ez.onclick = function () { $("zoom").onclick(); }; // ingrandisce il pannello senza chiudere l'anteprima
+    ez.id = "pvz"; ez.innerHTML = $("zoom").innerHTML; ez.title = $("zoom").title; ez.setAttribute("aria-label", $("zoom").title); ez.onclick = function () { $("zoom").onclick(); }; // ingrandisce il pannello senza chiudere l'anteprima
     var box = el("div", "pb"); box.tabIndex = -1;
     o.appendChild(ph); o.appendChild(box); document.body.appendChild(o); document.body.classList.add("pvopen");
     var pages = [], epoch = 0;
