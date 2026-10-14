@@ -47,19 +47,21 @@
   .muted { color:var(--muted); font-size:12px; }
   .dp { position:relative; display:flex; gap:6px; align-items:center; }
   .dp button { padding:6px 9px; line-height:0; }
-  .cal { position:absolute; top:100%; left:0; margin-top:6px; z-index:40; width:288px; padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 10px 28px rgba(0,0,0,.22); }
-  .cal .h { display:flex; align-items:center; gap:6px; margin-bottom:8px; } .cal .h b { flex:1; text-align:center; font-size:14px; text-transform:capitalize; }
-  .cal .h button { width:30px; height:30px; padding:0; border-radius:50%; font-size:18px; line-height:1; background:none; border:0; color:var(--muted); }
+  .cwrap { position:relative; }
+  .cal { position:absolute; top:-6px; left:calc(100% + 8px); z-index:40; width:240px; padding:8px 10px; background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.22); }
+  .cal.below { top:calc(100% + 6px); left:-156px; }
+  .cal .h { display:flex; align-items:center; gap:4px; margin-bottom:4px; } .cal .h b { flex:1; text-align:center; font-size:13px; text-transform:capitalize; }
+  .cal .h button { width:26px; height:26px; padding:0; border-radius:50%; font-size:16px; line-height:1; background:none; border:0; color:var(--muted); }
   .cal .h button:hover { background:var(--soft); color:var(--text); }
-  .cal .g { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:34px; gap:2px; text-align:center; align-items:center; }
-  .cal .g .w { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; }
-  .cal .g button { width:34px; height:34px; margin:0 auto; padding:0; background:none; color:var(--text); font-size:13px; font-weight:500; border:0; border-radius:50%; }
+  .cal .g { display:grid; grid-template-columns:repeat(7,1fr); grid-auto-rows:26px; gap:1px; text-align:center; align-items:center; }
+  .cal .g .w { font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; }
+  .cal .g button { width:26px; height:26px; margin:0 auto; padding:0; background:none; color:var(--text); font-size:12px; font-weight:500; border:0; border-radius:50%; }
   .cal .g button:hover { background:var(--soft); }
   .cal .g button.out { color:var(--muted); opacity:.45; } .cal .g button.we { color:var(--muted); }
   .cal .g button.today { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--accent); font-weight:700; }
   .cal .g button.sel { background:var(--accent); color:#fff; box-shadow:none; font-weight:700; opacity:1; }
-  .cal .f { display:flex; justify-content:space-between; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }
-  .cal .f button { background:none; border:0; color:var(--accent); font-weight:600; font-size:13px; padding:4px 8px; }
+  .cal .f { display:flex; justify-content:space-between; margin-top:4px; padding-top:4px; border-top:1px solid var(--line); }
+  .cal .f button { background:none; border:0; color:var(--accent); font-weight:600; font-size:12px; padding:3px 6px; }
   #toasts { position:fixed; top:8px; left:12px; right:12px; z-index:50; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
   .toast { pointer-events:auto; display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:8px; font-size:13px; font-weight:600; box-shadow:0 4px 14px rgba(0,0,0,.18); border:1px solid var(--line); background:var(--ok-bg); color:var(--ok); cursor:pointer; }
   .toast.bad { background:var(--err-bg); color:var(--err); } .toast.neu { background:var(--soft); color:var(--muted); } .toast span { flex:1; } .toast i { font-style:normal; opacity:.7; }
@@ -101,8 +103,8 @@
   <input type="text" id="nm" maxlength="60" placeholder="es. Progetto 8001 – revisione giugno" autocomplete="off">
   <label for="sd">Data di inizio progetto (facoltativa)</label>
   <div class="dp"><input type="text" id="sd" inputmode="numeric" maxlength="10" placeholder="gg/mm/aaaa" autocomplete="off" style="max-width:150px">
-    <button type="button" class="sec" id="sdbtn" title="Scegli dal calendario" aria-label="Scegli dal calendario"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg></button>
-    <div id="cal" class="cal hide"></div></div>
+    <div class="cwrap"><button type="button" class="sec" id="sdbtn" title="Scegli dal calendario" aria-label="Scegli dal calendario"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg></button>
+    <div id="cal" class="cal hide"></div></div></div>
   <div id="sdmsg" class="muted"></div>
   <label>Scope of Work (PDF)</label>
   <div class="drop" id="drop">Trascina qui i PDF oppure clicca per sceglierli<input type="file" id="file" accept="application/pdf,.pdf" multiple class="hide"></div>
@@ -310,7 +312,7 @@
     e.stopPropagation();
     if (!$("cal").classList.contains("hide")) { $("cal").classList.add("hide"); return; }
     var iso = sdIso(), d = iso ? new Date(iso + "T00:00:00") : new Date();
-    calY = d.getFullYear(); calM = d.getMonth(); drawCal(); $("cal").classList.remove("hide");
+    calY = d.getFullYear(); calM = d.getMonth(); $("cal").classList.toggle("below", document.documentElement.clientWidth < 500); drawCal(); $("cal").classList.remove("hide");
   };
   $("cal").onclick = function (e) { e.stopPropagation(); }; // i pulsanti del calendario vengono ridisegnati: il clic non deve chiuderlo
   document.addEventListener("click", function (e) { var c = $("cal"); if (!c.classList.contains("hide") && !c.contains(e.target) && e.target !== $("sd")) c.classList.add("hide"); });
