@@ -41,6 +41,7 @@
   .rng { position:relative; height:2px; margin:9px 4px 4px; background:var(--line); border-radius:2px; } .rng i { position:absolute; left:-4px; right:-4px; top:-3px; height:8px; background:linear-gradient(var(--c2),var(--c2)) center/100% 2px no-repeat; }
   .rng:before, .rng:after { content:""; position:absolute; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--c2); } .rng:before { left:-4px; } .rng:after { right:-4px; }
   .re { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:3px; text-transform:capitalize; }
+  .files .tag { font-size:11px; color:var(--c2); background:var(--soft); border:1px solid var(--line); border-radius:99px; padding:1px 8px; white-space:nowrap; }
   .rl { display:flex; flex-direction:column; gap:5px; max-width:340px; } .rl button { align-self:flex-start; } .rl .hint { font-size:12px; color:var(--muted); line-height:1.35; }
   .prep { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin:6px 0 4px; }
   .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:rot .8s linear infinite; }
@@ -282,10 +283,15 @@
     var ul = $("files"); ul.textContent = "";
     files.forEach(function (f, i) {
       var li = el("li"); li.appendChild(el("span", "n", f.name));
+      if (f.reuse) li.appendChild(el("span", "tag", "già caricato"));
       li.appendChild(el("span", "s", mb(f.size) + (f.pages ? " · " + f.pages + (f.pages === 1 ? " pagina" : " pagine") : "")));
       if (f.bad) { var bw = el("span", "s", "non è un PDF valido"); bw.style.color = "var(--err)"; li.appendChild(bw); }
       var pb = el("button", "sec ico", ""); pb.type = "button"; pb.innerHTML = EYE; pb.title = "Anteprima rapida"; pb.setAttribute("aria-label", "Anteprima di " + f.name);
-      pb.onclick = function () { openPreview(f.name, function () { return f.arrayBuffer ? f.arrayBuffer() : new Promise(function (ok, no) { var rd = new FileReader(); rd.onload = function () { ok(rd.result); }; rd.onerror = no; rd.readAsArrayBuffer(f); }); }, ""); };
+      if (f.reuse) pb.onclick = function () { // file già nel bucket (da una generazione precedente): anteprima dal link firmato
+        call("mdr_link", { job_id: f.reuse, tipo: "sow", nome: f.name }).then(function (l) {
+          openPreview(f.name, function () { return fetch(l.url).then(function (res) { if (!res.ok) throw new Error("download " + res.status); return res.arrayBuffer(); }); }, l.url);
+        }).catch(function (e) { say($("newmsg"), "Anteprima non disponibile: " + String((e && e.message) || e), "err"); });
+      }; else pb.onclick = function () { openPreview(f.name, function () { return f.arrayBuffer ? f.arrayBuffer() : new Promise(function (ok, no) { var rd = new FileReader(); rd.onload = function () { ok(rd.result); }; rd.onerror = no; rd.readAsArrayBuffer(f); }); }, ""); };
       if (!f.bad) li.appendChild(pb);
       var x = el("button", "x", "×"); x.title = "Rimuovi"; x.onclick = function () { if (!busy) { files.splice(i, 1); renderFiles(); } };
       li.appendChild(x); ul.appendChild(li);
@@ -412,14 +418,16 @@
     busy = true; renderFiles();
     var box = $("newmsg"), job = null;
     say(box, "Preparo il caricamento…");
+    var fresh = files.filter(function (f) { return !f.reuse; }), old = files.filter(function (f) { return f.reuse; });
     call("mdr_prepara_upload", {
       project_code: $("code").value.trim(), start_date: sdv, name: $("nm").value.trim(),
-      files: files.map(function (f) { return { name: f.name, size: f.size }; })
+      files: fresh.map(function (f) { return { name: f.name, size: f.size }; }),
+      riuso_job: old.length ? old[0].reuse : "", riuso_files: old.map(function (f) { return f.name; })
     }).then(function (p) {
       job = p.job_id;
       var n = 0;
       return Promise.all(p.uploads.map(function (u, i) {
-        return put(u.url, files[i]).then(function () { n++; say(box, "Caricati " + n + " di " + files.length + " PDF…"); });
+        return put(u.url, fresh[i]).then(function () { n++; say(box, "Caricati " + n + " di " + fresh.length + " PDF…"); });
       }));
     }).then(function () {
       say(box, "Avvio la generazione…");
@@ -959,32 +967,20 @@
       nm.title = n; fr.insertAdjacentHTML("beforeend", FILEI); fr.appendChild(nm); fr.appendChild(previewBtn(n));
       dn.innerHTML = DOWNI; dn.title = "Scarica " + n; dn.setAttribute("aria-label", "Scarica " + n); fr.appendChild(dn); fl.appendChild(fr);
     });
-    if (!r.active && r.sow_files.length) {
-      var lbl = r.state === "failed" ? "Riprova con gli stessi file" : "Nuova generazione da questi file";
-      var br = el("button", r.state === "failed" ? "" : "sec", lbl);
+    if (!r.active && r.sow_files.length) { // apre "Nuova generazione" già compilata: codice, nome, data e SoW di questa; si cambia ciò che serve e si avvia
+      var br = el("button", r.state === "failed" ? "" : "sec", r.state === "failed" ? "Riprova con gli stessi file" : "Nuova generazione da questi file");
       br.onclick = function () {
-        var base = r.state === "failed" ? "" : "sec";
-        if (!br.dataset.sure) { // controlla i doppioni, poi chiede conferma: ogni generazione consuma crediti dei modelli
-          br.disabled = true; br.textContent = "Controllo…";
-          call("mdr_esistenti", { project_code: r.project_code }).then(function (d) { return (d && d.esistenti) || []; }, function () { return null; }).then(function (ex) {
-            if (!br.isConnected) return;
-            br.disabled = false; br.dataset.sure = "1"; br.textContent = "Avvia nuova generazione"; br.className = "";
-            say($("detmsg"), ex === null
-              ? "Non sono riuscito a controllare se esistono altre generazioni del progetto " + r.project_code + ". Se continui ne parte una nuova e consuma altri crediti dei modelli."
-              : ex.length
-                ? "Per il progetto " + r.project_code + " esiste già: " + ex.map(function (e) { return (e.state === "succeeded" ? "completata " : "in corso ") + relLabel(e.created_label) + (e.name ? " («" + e.name + "»)" : ""); }).join("; ") + ". Se continui ne parte un'altra e consuma altri crediti dei modelli."
-                : "Parte una nuova generazione con gli stessi file e consuma crediti dei modelli.");
-            setTimeout(function () { if (br.isConnected && br.dataset.sure && !br.disabled) { delete br.dataset.sure; br.textContent = lbl; br.className = base; say($("detmsg"), ""); } }, 12000);
-          });
-          return;
-        }
-        br.disabled = true; br.textContent = "Avvio…";
-        call("mdr_rilancia", { job_id: curJob }).then(function (n) {
-          runs[n.job_id] = n; if (cache) { cache.runs.unshift(n); cache.at = 0; } curJob = n.job_id; links = null; show("det");
-        }).catch(function (e) { br.disabled = false; br.textContent = lbl; br.className = base; delete br.dataset.sure; say($("detmsg"), String(e.message || e), "err"); });
+        if (busy) { say($("detmsg"), "C'è un avvio in corso nella scheda Nuova generazione: attendi che finisca.", "err"); return; }
+        var rr = runs[r.job_id] || r, sz = rr.sow_sizes || {};
+        files = (rr.sow_files || []).map(function (n) { return { name: n, size: sz[n] || 0, reuse: rr.job_id, pages: null }; });
+        $("code").value = rr.project_code || ""; $("nm").value = rr.name || "";
+        $("sd").value = rr.start_label || ""; $("sd")._len = $("sd").value.length; $("sdmsg").textContent = "";
+        dupFor = ""; $("go").textContent = "Avvia generazione"; renderFiles();
+        say($("newmsg"), "Ho ripreso codice progetto, data e file da questa generazione: cambia ciò che serve e premi Avvia generazione.", "ok");
+        show("new");
       };
       var rl = el("div", "rl"); rl.appendChild(br);
-      rl.appendChild(el("div", "hint", r.state === "failed" ? "Parte una nuova generazione con gli stessi file; questa resta nell'elenco." : "Questa generazione resta com'è: ne parte una nuova, separata, con gli stessi Scope of Work."));
+      rl.appendChild(el("div", "hint", "Apre una nuova generazione già compilata con questi file: potrai cambiare i dati prima di avviarla. Questa resta nell'elenco."));
       ops.appendChild(rl);
     }
     if (!r.active) {

@@ -493,6 +493,8 @@ class GeneratorService:
         }
         if detail and (step or state == "succeeded"):
             view["steps"] = _timeline(run)
+        if detail and state not in ACTIVE_STATES:  # dimensioni dei SoW: servono a riusarli in una nuova generazione
+            view["sow_sizes"] = {n: self.b.size(f"jobs/{run['job_id']}/input/{n}") or 0 for n in (run.get("sow_files") or [])[:20]}
         if detail and state == "succeeded":
             view["digest"] = _public_digest(run.get("digest"))
         return view
@@ -593,21 +595,37 @@ class GeneratorService:
         return " ".join("".join(ch for ch in str(name or "") if ch.isprintable()).split())[:60]
 
     def prepare_upload(self, project_code: str, start_date: str, files: List[Tuple[str, int]], user: str = "",
-                       name: str = "") -> Dict:
+                       name: str = "", reuse_job: str = "", reuse_names: Optional[List[str]] = None) -> Dict:
+        """Prepara una nuova generazione. Oltre ai PDF da caricare si possono riusare quelli di una generazione
+        precedente (reuse_job + nomi): si copiano nel bucket solo all'avvio, senza passare dal browser."""
         project_code, start_date = project_code.strip(), start_date.strip()
-        error = self._check(project_code, start_date, files)
+        reused: List[Tuple[str, int]] = []
+        if reuse_names:
+            if not valid_job_id(reuse_job):
+                raise ValueError("Generazione di origine non trovata.")
+            source = self.get(reuse_job)
+            for rn in dict.fromkeys(reuse_names):
+                if rn not in (source.get("sow_files") or []):
+                    raise ValueError(f"'{rn}' non è tra i file della generazione di origine.")
+                size = self.b.size(f"jobs/{reuse_job}/input/{rn}")
+                if size is None:
+                    raise ValueError(f"'{rn}' non è più disponibile: caricalo di nuovo.")
+                reused.append((rn, size))
+        error = self._check(project_code, start_date, list(files) + reused)
         if error:
             raise ValueError(error)
         job_id = new_job_id(project_code)
-        names = self._safe_names([n for n, _ in files])
-        uploads = []
-        for safe, (original, size) in zip(names, files):  # (non riusare "name": è il nome scelto dall'utente)
+        names = self._safe_names([n for n, _ in files] + [n for n, _ in reused])
+        uploads, pending_files = [], []
+        for safe, (original, size) in zip(names[:len(files)], files):  # (non riusare "name": è il nome scelto dall'utente)
             uploads.append({"name": safe, "original": original, "size": size,
                             "url": self.b.signed_put_url(f"jobs/{job_id}/input/{safe}", "application/pdf")})
+            pending_files.append({"name": safe, "size": size})
+        for safe, (original, size) in zip(names[len(files):], reused):
+            pending_files.append({"name": safe, "size": size, "from_job": reuse_job, "from_name": original})
         self.b.write_json(f"jobs/{job_id}/pending.json", {
             "project_code": project_code, "start_date": start_date, "user": user, "created_at": _now_iso(),
-            "name": self._clean_name(name),
-            "files": [{"name": u["name"], "size": u["size"]} for u in uploads],
+            "name": self._clean_name(name), "files": pending_files,
         })
         return {"job_id": job_id, "uploads": uploads}
 
@@ -618,6 +636,12 @@ class GeneratorService:
         if not pending:
             raise ValueError("Caricamento non trovato o già avviato.")
         names = [f["name"] for f in pending.get("files", [])]
+        for f in pending.get("files", []):  # file riusati da una generazione precedente: si copiano ora
+            if f.get("from_job"):
+                src = f"jobs/{f['from_job']}/input/{f.get('from_name') or f['name']}"
+                if not valid_job_id(f["from_job"]) or not self.b.exists(src):
+                    raise ValueError(f"'{f['name']}' non è più disponibile: caricalo di nuovo.")
+                self.b.copy(src, f"jobs/{job_id}/input/{f['name']}")
         sizes: List[Tuple[str, int]] = []
         for name in names:
             key = f"jobs/{job_id}/input/{name}"
@@ -905,9 +929,10 @@ def register_mdr_generator(mcp: FastMCP, backend=None) -> None:
     @mcp.tool(name="mdr_prepara_upload", title="Prepara caricamento", description="Usato solo dal pannello.",
               annotations=write_hints, meta=app_only)
     async def mdr_prepara_upload(project_code: str, start_date: str = "", files: Optional[List[dict]] = None,
-                                 name: str = "") -> dict:
+                                 name: str = "", riuso_job: str = "", riuso_files: Optional[List[str]] = None) -> dict:
         parsed = [(str(f.get("name", "")), int(f.get("size") or 0)) for f in (files or [])]
-        return await run(svc.prepare_upload, project_code, start_date, parsed, "gemini", name)
+        return await run(svc.prepare_upload, project_code, start_date, parsed, "gemini", name,
+                         riuso_job, [str(n) for n in (riuso_files or [])][:20])
 
     @mcp.tool(name="mdr_esistenti", title="Generazioni dello stesso progetto", description="Usato solo dal pannello.",
               annotations=read_hints, meta=app_only)
