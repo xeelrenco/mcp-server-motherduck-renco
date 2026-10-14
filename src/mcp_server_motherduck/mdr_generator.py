@@ -629,16 +629,21 @@ class GeneratorService:
         return self.view(run)
 
     def existing(self, project_code: str) -> Dict:
-        """Generazioni già presenti per lo stesso codice progetto (escluse annullate e fallite)."""
+        """Generazioni già presenti per lo stesso codice progetto (escluse annullate e fallite).
+        Si scorrono le più recenti a blocchi: tante prove annullate non devono nascondere quella completata."""
         code = (project_code or "").strip().lower()
-        ids = [i for i in self.b.list_job_ids() if "-".join(i.split("-")[2:-1]).lower() == code][:5] if code else []
+        ids = [i for i in self.b.list_job_ids() if "-".join(i.split("-")[2:-1]).lower() == code] if code else []
         out: List[Dict] = []
-        for run in ThreadPoolExecutor(max_workers=5).map(self._load, ids):
-            if run and run.get("state") in ACTIVE_STATES | {"succeeded"}:
-                v = self.view(run)
-                out.append({"job_id": v["job_id"], "state": v["state"], "state_label": v["state_label"],
-                            "created_label": v["created_label"], "name": v["name"]})
-        return {"esistenti": out}
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for start in range(0, min(len(ids), 80), 8):
+                for run in pool.map(self._load, ids[start:start + 8]):
+                    if run and run.get("state") in ACTIVE_STATES | {"succeeded"}:
+                        v = self.view(run)
+                        out.append({"job_id": v["job_id"], "state": v["state"], "state_label": v["state_label"],
+                                    "created_label": v["created_label"], "name": v["name"]})
+                if len(out) >= 3:
+                    break
+        return {"esistenti": out[:3]}
 
     def cancel(self, job_id: str, user: str = "") -> Dict:
         run = self.get(job_id)
