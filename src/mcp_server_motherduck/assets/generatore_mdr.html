@@ -62,6 +62,12 @@
   .cal .g button.out { color:var(--muted); opacity:.45; } .cal .g button.we { color:var(--muted); }
   .cal .g button.today { box-shadow:inset 0 0 0 1.5px var(--accent); color:var(--accent); font-weight:700; }
   .cal .g button.sel { background:var(--accent); color:#fff; box-shadow:none; font-weight:700; opacity:1; }
+  .cal.rng { top:calc(100% + 6px); left:0; width:252px; }
+  .cal .p { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
+  .cal .p button { background:var(--soft); border:1px solid var(--line); color:var(--text); border-radius:99px; padding:2px 9px; font-size:11px; font-weight:600; }
+  .cal .g button.inr { background:var(--soft); border-radius:0; color:var(--accent); }
+  .cal .hint { font-size:11px; color:var(--muted); margin-top:4px; min-height:15px; }
+  #fdbtn { display:inline-flex; align-items:center; gap:6px; padding:7px 9px; font-weight:500; }
   .cal .f { display:flex; justify-content:space-between; margin-top:4px; padding-top:4px; border-top:1px solid var(--line); }
   .cal .f button { background:none; border:0; color:var(--accent); font-weight:600; font-size:12px; padding:3px 6px; }
   #toasts { position:fixed; top:8px; left:12px; right:12px; z-index:50; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
@@ -131,9 +137,7 @@
       <option value="">Tutti gli stati</option><option value="active">In corso</option><option value="succeeded">Completati</option>
       <option value="failed">In errore</option><option value="cancelled">Annullati</option>
     </select>
-    <select id="fd" aria-label="Filtra per data">
-      <option value="">Tutte le date</option><option value="today">Oggi</option><option value="7">Ultimi 7 giorni</option><option value="30">Ultimi 30 giorni</option>
-    </select>
+    <div class="cwrap"><button type="button" class="sec" id="fdbtn" aria-label="Filtra per data" title="Filtra per data"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg><span id="fdlbl">Tutte le date</span></button><div id="rcal" class="cal rng hide"></div></div>
     <select id="fo" aria-label="Ordina">
       <option value="new">Più recenti prima</option><option value="old">Meno recenti prima</option>
     </select>
@@ -469,7 +473,7 @@ window.__mcpApps={App:OO};})();</script>
     for (var i = 0; i < 4; i++) { var l = skel(60 + i * 8 + "%", "12px"); l.style.marginBottom = "8px"; box.appendChild(l); }
     var act = el("div", "actions"); act.appendChild(skel("110px", "30px")); act.appendChild(skel("150px", "30px")); act.appendChild(skel("60px", "30px")); box.appendChild(act);
   }
-  var fdate = "", forder = "new", runs = {}, currentRuns = [], currentMore = false, fq = "", fs = "", flimit = 10, loadTok = 0;
+  var rFrom = 0, rTo = 0, fdate = "", forder = "new", runs = {}, currentRuns = [], currentMore = false, fq = "", fs = "", flimit = 10, loadTok = 0;
   var selecting = false, picked = {};
   function pickedIds() { return Object.keys(picked).filter(function (k) { return picked[k]; }); }
   function updateSel() {
@@ -557,7 +561,7 @@ window.__mcpApps={App:OO};})();</script>
   function matches(r) {
     var q = fq.toLowerCase();
     if (q && (String(r.project_code || "") + " " + String(r.name || "")).toLowerCase().indexOf(q) < 0) return false;
-    if (fdate) { var a = ageDays(r.created_label); if (a === null) return false; if (fdate === "today" ? a > 0 : a > (+fdate - 1)) return false; }
+    if (fdate) { var pl = parseLabel(r.created_label); if (!pl) return false; var dn = Date.UTC(pl.y, pl.mo - 1, pl.d) / 864e5; if (dn < rFrom || dn > rTo) return false; }
     if (fs === "active") return !!r.active;
     return !fs || r.state === fs;
   }
@@ -589,16 +593,70 @@ window.__mcpApps={App:OO};})();</script>
     drawList();
     if (force || Date.now() - cache.at > 30000) refresh();
   }
+  // ---- filtro per data: calendario a intervallo (clic sul primo giorno, poi sull'ultimo)
+  var rcY = 0, rcM = 0, rPending = false;
+  function dayNum(y, m, d) { return Date.UTC(y, m, d) / 864e5; }
+  function dnLabel(n, withYear) { var dt = new Date(n * 864e5); return pad2(dt.getUTCDate()) + "/" + pad2(dt.getUTCMonth() + 1) + (withYear ? "/" + dt.getUTCFullYear() : ""); }
+  function setRange(a, b) {
+    fdate = a === null ? "" : "1"; rFrom = a; rTo = b;
+    $("fdlbl").textContent = a === null ? "Tutte le date" : a === b ? dnLabel(a, true) : dnLabel(a, new Date(a * 864e5).getUTCFullYear() !== new Date(b * 864e5).getUTCFullYear()) + " – " + dnLabel(b, true);
+    filtersChanged();
+  }
+  function closeRcal() { rPending = false; $("rcal").classList.add("hide"); }
+  function drawRcal() {
+    var c = $("rcal"); c.textContent = "";
+    var tp = romeToday();
+    var p = el("div", "p");
+    [["Oggi", 0], ["Ultimi 7 giorni", 6], ["Ultimi 30 giorni", 29]].forEach(function (x) {
+      var b = el("button", "", x[0]); b.type = "button"; b.onclick = function () { setRange(tp - x[1], tp); closeRcal(); }; p.appendChild(b);
+    });
+    c.appendChild(p);
+    var h = el("div", "h"), pv = el("button", "", "‹"), nx = el("button", "", "›");
+    pv.type = nx.type = "button"; pv.title = "Mese precedente"; nx.title = "Mese successivo";
+    pv.onclick = function () { rcM--; if (rcM < 0) { rcM = 11; rcY--; } drawRcal(); };
+    nx.onclick = function () { rcM++; if (rcM > 11) { rcM = 0; rcY++; } drawRcal(); };
+    h.appendChild(pv); h.appendChild(el("b", "", MESI[rcM] + " " + rcY)); h.appendChild(nx); c.appendChild(h);
+    var g = el("div", "g"); ["lun","mar","mer","gio","ven","sab","dom"].forEach(function (d) { g.appendChild(el("span", "w", d)); });
+    var first = (new Date(rcY, rcM, 1).getDay() + 6) % 7;
+    for (var i = 0; i < 42; i++) (function (i) {
+      var dt = new Date(rcY, rcM, 1 - first + i), y = dt.getFullYear(), m = dt.getMonth(), d = dt.getDate(), n = dayNum(y, m, d), wd = i % 7;
+      var ends = fdate && (n === rFrom || n === rTo), inside = fdate && n > rFrom && n < rTo;
+      var cls = (m !== rcM ? "out " : "") + (wd >= 5 ? "we " : "") + (n === tp ? "today " : "") + (ends ? "sel " : inside ? "inr" : "");
+      var b = el("button", cls.trim(), String(d)); b.type = "button";
+      b.onclick = function () {
+        if (!rPending) { rPending = true; setRange(n, n); }                 // primo clic: un solo giorno
+        else { setRange(Math.min(rFrom, n), Math.max(rFrom, n)); closeRcal(); } // secondo clic: intervallo
+        if (!$("rcal").classList.contains("hide")) drawRcal();
+      };
+      g.appendChild(b);
+    })(i);
+    c.appendChild(g);
+    c.appendChild(el("div", "hint", rPending ? "Ora scegli l'ultimo giorno (o chiudi per un solo giorno)." : "Scegli il primo giorno, poi l'ultimo."));
+    var f = el("div", "f"), cl = el("button", "", "Azzera"), ok = el("button", "", "Chiudi"); cl.type = ok.type = "button";
+    cl.onclick = function () { setRange(null, null); closeRcal(); }; ok.onclick = closeRcal;
+    f.appendChild(cl); f.appendChild(ok); c.appendChild(f);
+  }
+  $("fdbtn").onclick = function (e) {
+    e.stopPropagation();
+    if (!$("rcal").classList.contains("hide")) { closeRcal(); return; }
+    var n = fdate ? rFrom : romeToday(), d = new Date(n * 864e5);
+    rcY = d.getUTCFullYear(); rcM = d.getUTCMonth(); rPending = false; drawRcal();
+    var rc = $("rcal"); rc.style.left = ""; rc.classList.remove("hide");
+    var over = rc.getBoundingClientRect().right - document.documentElement.clientWidth + 8; // non esce a destra
+    if (over > 0) rc.style.left = Math.max(-over, -(rc.parentNode.getBoundingClientRect().left - 4)) + "px";
+  };
+  $("rcal").onclick = function (e) { e.stopPropagation(); };
+  document.addEventListener("click", function (e) { if (!$("rcal").classList.contains("hide") && !$("rcal").contains(e.target)) closeRcal(); });
   var ftimer = null;
   function filtersChanged() {
-    fq = $("fq").value.trim(); fs = $("fs").value; fdate = $("fd").value; forder = $("fo").value; flimit = 10; picked = {};
+    fq = $("fq").value.trim(); fs = $("fs").value; forder = $("fo").value; flimit = 10; picked = {};
     $("fclear").classList.toggle("hide", !(fq || fs || fdate || forder !== "new"));
     drawList();
   }
   $("fq").oninput = filtersChanged;
   $("fq").onkeydown = function (e) { if (e.key === "Enter") { clearTimeout(ftimer); filtersChanged(); } };
-  $("fs").onchange = $("fd").onchange = $("fo").onchange = filtersChanged;
-  $("fclear").onclick = function () { $("fq").value = ""; $("fs").value = ""; $("fd").value = ""; $("fo").value = "new"; filtersChanged(); };
+  $("fs").onchange = $("fo").onchange = filtersChanged;
+  $("fclear").onclick = function () { $("fq").value = ""; $("fs").value = ""; setRange(null, null); $("fo").value = "new"; filtersChanged(); };
   $("refresh").onclick = function () { loadList(true); };
   $("back").onclick = function () { show("list"); };
 
@@ -794,7 +852,7 @@ window.__mcpApps={App:OO};})();</script>
   try { var zs = +localStorage.getItem("mdr_zoom"); if (zs >= 0 && zs < ZOOMS.length) zoomI = zs; } catch (x) {}
   function applyZoom() {
     document.body.style.zoom = ZOOMS[zoomI] === 1 ? "" : String(ZOOMS[zoomI]);
-    var back = fsMode || zoomI === ZOOMS.length - 1, tip = fsMode ? "Riduci" : back ? "Vista normale" : zoomI > 0 ? "Ingrandisci ancora" : "Ingrandisci";
+    var back = fsMode || zoomI === ZOOMS.length - 1, tip = fsMode ? "Riduci (Esc)" : back ? "Vista normale (Esc)" : zoomI > 0 ? "Ingrandisci ancora (Esc per tornare)" : "Ingrandisci";
     $("zoom").innerHTML = back ? ICON_COL : ICON_EXP; $("zoom").title = tip; $("zoom").setAttribute("aria-label", tip);
     if (!fsMode) { try { localStorage.setItem("mdr_zoom", String(zoomI)); } catch (x) {} }
   }
@@ -815,6 +873,16 @@ window.__mcpApps={App:OO};})();</script>
   app.onhostcontextchanged = function (c) { // se la chat cambia modalità da sola (es. tasto Esc)
     if (c && c.displayMode && (c.displayMode === "fullscreen") !== fsMode) { fsMode = c.displayMode === "fullscreen"; zoomI = fsMode ? 1 : 0; applyZoom(); }
   };
+  function exitZoom() {
+    if (fsMode) { setMode("inline").catch(function () { fsMode = false; zoomI = 0; applyZoom(); }); }
+    else if (zoomI > 0) { zoomI = 0; applyZoom(); }
+  }
+  document.addEventListener("keydown", function (e) { // Esc: chiude prima i calendari aperti, poi torna alla vista normale
+    if (e.key !== "Escape") return;
+    if (!$("rcal").classList.contains("hide")) { closeRcal(); return; }
+    if (!$("cal").classList.contains("hide")) { $("cal").classList.add("hide"); return; }
+    exitZoom();
+  });
   applyZoom();
   app.connect && app.connect();
   renderFiles();
