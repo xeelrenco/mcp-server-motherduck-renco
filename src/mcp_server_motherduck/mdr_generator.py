@@ -379,7 +379,19 @@ def _public_digest(d: Any) -> Optional[Dict]:
              for x in (d.get("disciplines") or [])[:60] if isinstance(x, dict) and num(x.get("rows")) > 0]
     months = [{"ym": str(x.get("ym") or "")[:7], "rows": num(x.get("rows"))}
               for x in (d.get("months") or [])[:240] if isinstance(x, dict) and re.match(r"^\d{4}-\d{2}$", str(x.get("ym") or ""))]
+    for x, src in zip(discs, [y for y in (d.get("disciplines") or [])[:60] if isinstance(y, dict) and num(y.get("rows")) > 0]):
+        x["hours"] = num(src.get("hours"))
     out: Dict[str, Any] = {"disciplines": discs, "months": months}
+    if num(d.get("hours")) > 0:
+        out["hours"] = num(d.get("hours"))
+    wk = d.get("weekly")
+    if isinstance(wk, dict) and re.match(r"^\d{4}-\d{2}-\d{2}$", str(wk.get("start") or "")):
+        series = []
+        for s in (wk.get("series") or [])[:60]:
+            if isinstance(s, dict) and isinstance(s.get("hours"), list):
+                series.append({"code": str(s.get("code") or "")[:12], "hours": [num(h) for h in s["hours"][:260]]})
+        if series:
+            out["weekly"] = {"start": wk["start"], "series": series}
     for k in ("first", "last"):
         v = str(d.get(k) or "")
         if re.match(r"^\d{4}-\d{2}-\d{2}$", v):

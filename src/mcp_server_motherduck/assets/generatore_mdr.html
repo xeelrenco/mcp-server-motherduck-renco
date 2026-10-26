@@ -110,6 +110,15 @@
   .hist .c i { flex:none; display:block; width:100%; background:var(--c2); border-radius:4px 4px 2px 2px; opacity:.8; min-height:3px; } .hist .c.pk i { opacity:1; }
   .hist .v { font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; margin-bottom:2px; }
   .hist .m { font-size:10px; color:var(--muted); margin-top:3px; height:22px; text-transform:uppercase; line-height:1.15; text-align:center; } .hist .m u { display:block; text-decoration:none; opacity:.7; }
+  /* ore uomo: palette categorica condivisa tra barre e grafico settimanale */
+  :root { --p0:#2f6fb5; --p1:#e08a2c; --p2:#2f9e77; --p3:#b24a9a; --p4:#d1495b; --p5:#7a6bd1; --p6:#3a9fbf; --p7:#9aa0ab; }
+  @media (prefers-color-scheme: dark) { :root { --p0:#5b9bea; --p1:#f0a24d; --p2:#4cc096; --p3:#d377bd; --p4:#ee7585; --p5:#9d90ee; --p6:#5cc0dd; --p7:#7b8393; } }
+  .dbar.hr { grid-template-columns:minmax(80px,170px) 1fr 92px; } .dbar.hr .nm { display:flex; align-items:center; gap:7px; } .dbar.hr .nm:before { content:""; flex:none; width:8px; height:8px; border-radius:2px; background:var(--pc); }
+  .dbar.hr .tr i { background:var(--pc); }
+  .wkc { margin-top:2px; } .wkc svg { display:block; width:100%; height:auto; overflow:visible; }
+  .wkc .gl { stroke:var(--line); stroke-width:1; } .wkc .ax { fill:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; }
+  .wkc .wk rect.b { transition:opacity .12s; } .wkc svg:hover .wk:not(:hover) rect.b { opacity:.45; } .wkc .wk rect.h { fill:transparent; }
+  .dg .sub { font-weight:400; text-transform:none; letter-spacing:0; opacity:.85; }
   .dg .foot { margin-top:8px; font-size:12px; color:var(--muted); }
   .tl { list-style:none; margin:6px 0 4px; padding:0; }
   .tl li { position:relative; display:flex; align-items:center; gap:8px; padding:3px 0 3px 26px; font-size:13px; color:var(--muted); }
@@ -818,8 +827,82 @@ window.__mcpApps={App:OO};})();</script>
   function monthYear(s) { var p = s.split("-"); return MESI3[+p[1] - 1] + " " + p[0]; }
   function shortDate(s) { var p = s.split("-"); return (+p[2]) + " " + MESI3[+p[1] - 1] + " " + p[0]; }
   function isoLabel(s) { var p = s.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs, parent, text) { var n = document.createElementNS(SVGNS, tag); for (var k in attrs) n.setAttribute(k, attrs[k]); if (text !== undefined) n.textContent = text; if (parent) parent.appendChild(n); return n; }
+  function nf(n) { return Number(n).toLocaleString("it-IT"); }
+  function niceStep(mx) { var s = [10, 20, 25, 50, 100, 200, 250, 500]; for (var e = 1; e < 1e7; e *= 10) for (var i = 0; i < s.length; i++) { if (s[i] * e / 10 * 5 >= mx) return s[i] * e / 10; } return mx; }
+  function weekDate(startIso, i) { var p = startIso.split("-"); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + 7 * i)); }
+  function hoursChart(g, pal) { // colonne settimanali impilate per disciplina (stesso schema del foglio "Ore settimanali per disciplina" del report qualità)
+    var S = g.weekly.series, n = 0; S.forEach(function (s) { if (s.hours.length > n) n = s.hours.length; });
+    var top = S.slice(0, 7), rest = S.slice(7), nameOf = {}; g.disciplines.forEach(function (d) { nameOf[d.code] = d.name || d.code; });
+    var layers = top.map(function (s, i) { return { label: nameOf[s.code] || s.code, c: pal[s.code], h: s.hours }; });
+    if (rest.length) { var oh = []; for (var i = 0; i < n; i++) { var v = 0; rest.forEach(function (s) { v += s.hours[i] || 0; }); oh.push(v); } layers.push({ label: "Altre (" + rest.length + ")", c: 7, h: oh }); }
+    var tot = [], mx = 0; for (var i = 0; i < n; i++) { var v = 0; layers.forEach(function (l) { v += l.h[i] || 0; }); tot.push(v); if (v > mx) mx = v; }
+    var step = niceStep(mx || 1), top_y = Math.ceil((mx || 1) / step) * step;
+    var W = 640, H = 196, L = 44, R = 4, T = 8, B = 26, pw = W - L - R, ph = H - T - B, bw = pw / n, gap = bw > 6 ? 1.5 : (bw > 3 ? 1 : 0.5);
+    var wrap = el("div", "wkc"), svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Ore uomo per settimana, per disciplina" }, wrap);
+    for (var v = 0; v <= top_y; v += step) {
+      var y = T + ph - ph * v / top_y; sv("line", { x1: L, x2: W - R, y1: y, y2: y, "class": "gl" }, svg);
+      sv("text", { x: L - 6, y: y + 3, "text-anchor": "end", "class": "ax" }, svg, nf(v));
+    }
+    var lastM = -1, monthStep = n > 70 ? 3 : 1;
+    for (var i = 0; i < n; i++) {
+      var x = L + i * bw, grp = sv("g", { "class": "wk" }, svg), d = weekDate(g.weekly.start, i), tip = "Settimana dal " + d.getUTCDate() + " " + MESI3[d.getUTCMonth()] + " " + d.getUTCFullYear() + " · " + nf(tot[i]) + " ore";
+      var yy = T + ph;
+      layers.forEach(function (l) {
+        var hv = l.h[i] || 0; if (!hv) return; var hh = ph * hv / top_y;
+        yy -= hh; sv("rect", { "class": "b", x: x + gap / 2, y: yy, width: Math.max(1, bw - gap), height: hh, fill: "var(--p" + l.c + ")" }, grp);
+        tip += "\n" + l.label + ": " + nf(hv);
+      });
+      sv("rect", { "class": "h", x: x, y: T, width: bw, height: ph }, grp);
+      sv("title", {}, grp, tip);
+      var mo = d.getUTCMonth();
+      if (mo !== lastM && (mo % monthStep === 0 || i === 0)) {
+        sv("text", { x: x + bw / 2, y: H - 12, "text-anchor": "middle", "class": "ax" }, svg, MESI3[mo]);
+        if (i === 0 || mo === 0) sv("text", { x: x + bw / 2, y: H - 1, "text-anchor": "middle", "class": "ax", opacity: ".7" }, svg, String(d.getUTCFullYear()));
+      }
+      lastM = mo;
+    }
+    return { node: wrap, tot: tot, max: mx, n: n };
+  }
+  function digestHours(g, sm, box) { // variante con ore uomo: barre per disciplina + grafico settimanale
+    var pal = {}; g.disciplines.forEach(function (d, i) { pal[d.code] = Math.min(i, 7); });
+    var kpi = el("div", "kpi");
+    function tile(big, small) { var k = el("div", "k"); k.appendChild(el("b", "", String(big))); k.appendChild(el("span", "", small)); kpi.appendChild(k); return k; }
+    tile(nf(g.hours), "ore uomo");
+    tile(nf(sm["Righe MDR"] !== undefined ? sm["Righe MDR"] : g.disciplines.reduce(function (a, d) { return a + d.rows; }, 0)), "righe MDR");
+    if (sm["Documenti"] !== undefined) tile(nf(sm["Documenti"]), "documenti");
+    tile(g.disciplines.length, g.disciplines.length === 1 ? "disciplina" : "discipline");
+    if (g.first && g.last) {
+      var days = Math.round((Date.parse(g.last) - Date.parse(g.first)) / 864e5), mo = Math.round(days / 30.44);
+      var kk = tile(days < 60 ? days + " giorni" : mo + " mesi", "durata progetto"), rg = el("div", "rng"), re = el("div", "re");
+      rg.appendChild(el("i")); re.appendChild(el("span", "", monthYear(g.first))); re.appendChild(el("span", "", monthYear(g.last)));
+      kk.appendChild(rg); kk.appendChild(re); kk.title = "Dal " + isoLabel(g.first) + " al " + isoLabel(g.last);
+    }
+    box.appendChild(kpi);
+    var sec = el("div"); box.appendChild(sec);
+    sec.appendChild(el("h4", "", "Ore uomo per disciplina"));
+    var ds = g.disciplines.filter(function (d) { return d.hours > 0; }), top = ds.slice(0, 7), rest = ds.slice(7), restN = 0; rest.forEach(function (x) { restN += x.hours; });
+    var mxh = top.length ? top[0].hours : 1; if (restN > mxh) mxh = restN;
+    function bar(label, n, c, tip) {
+      var row = el("div", "dbar hr"), nm = el("span", "nm", label), tr = el("span", "tr"), fi = el("i"), nn = el("span", "nn", nf(n) + " h · " + Math.round(100 * n / (g.hours || 1)) + "%");
+      row.style.setProperty("--pc", "var(--p" + c + ")"); nm.title = tip || label; fi.style.width = Math.max(2, Math.round(100 * n / mxh)) + "%"; tr.appendChild(fi);
+      row.appendChild(nm); row.appendChild(tr); row.appendChild(nn); sec.appendChild(row);
+    }
+    top.forEach(function (x) { bar(x.name || x.code, x.hours, pal[x.code], x.name ? x.code + " · " + x.name : x.code); });
+    if (rest.length) bar("Altre (" + rest.length + ")", restN, 7, rest.map(function (x) { return x.name || x.code; }).join(", "));
+    if (g.weekly) {
+      var h4 = el("h4", "", "Ore uomo per settimana"); box.appendChild(h4);
+      var ch = hoursChart(g, pal); box.appendChild(ch.node);
+      var pk = 0; ch.tot.forEach(function (v, i) { if (v > ch.tot[pk]) pk = i; });
+      var pd = weekDate(g.weekly.start, pk), avg = Math.round(g.hours / ch.n);
+      box.appendChild(el("div", "foot", "Picco nella settimana dal " + pd.getUTCDate() + " " + MESI[pd.getUTCMonth()] + " " + pd.getUTCFullYear() + ": " + nf(ch.max) + " ore · media " + nf(avg) + " ore a settimana su " + ch.n + " settimane"));
+    }
+    return box;
+  }
   function digestBox(r) { // riepilogo del risultato: numeri chiave, righe per disciplina, righe previste per mese
     var g = r.digest, sm = r.summary || {}, box = el("div", "dg");
+    if (g.hours > 0) return digestHours(g, sm, box);
     var total = 0; g.disciplines.forEach(function (x) { total += x.rows; });
     var kpi = el("div", "kpi");
     function tile(big, small) { var k = el("div", "k"); k.appendChild(el("b", "", String(big))); k.appendChild(el("span", "", small)); kpi.appendChild(k); }
