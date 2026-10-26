@@ -315,7 +315,7 @@ def _tz_offset_hours(d: dt.datetime) -> int:
 
 STEP_NAMES = ["Lettura Scope of Work", "Validazione discipline e capitoli", "Verifica catalogo documenti", "Filtri SoW sui documenti",
               "Profili documento", "Numero di istanze per documento", "Titoli specifici da SoW", "Espansione righe MDR",
-              "Controllo documenti obbligatori", "Pianificazione date", "Confronto con storico", "Compilazione Excel MDR"]
+              "Controllo documenti obbligatori", "Pianificazione date e priorità", "Confronto con storico", "Compilazione Excel MDR"]
 
 
 def _parse_iso(value: Any) -> Optional[dt.datetime]:
