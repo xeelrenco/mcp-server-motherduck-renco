@@ -1054,7 +1054,7 @@
       var br = el("button", r.state === "failed" ? "" : "sec", r.state === "failed" ? "Riprova con gli stessi file" : "Nuova generazione da questi file");
       br.onclick = function () {
         if (busy) { say($("detmsg"), "C'è un avvio in corso nella scheda Nuova generazione: attendi che finisca.", "err"); return; }
-        var rr = runs[r.job_id] || r, sz = rr.sow_sizes || {};
+        var rr = runs[r.job_id] || r, sz = r.sow_sizes || rr.sow_sizes || {};
         files = (rr.sow_files || []).map(function (n) { return { name: n, size: sz[n] || 0, reuse: rr.job_id, pages: null }; });
         $("code").value = rr.project_code || ""; $("nm").value = rr.name || "";
         $("sd").value = rr.start_label || ""; $("sd")._len = $("sd").value.length; $("sdmsg").textContent = "";
