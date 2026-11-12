@@ -135,7 +135,7 @@
   @keyframes tlp { 0% { box-shadow:0 0 0 0 rgba(31,95,174,.5); } 100% { box-shadow:0 0 0 8px rgba(31,95,174,0); } }
   details.tld { margin:8px 0 2px; } details.tld > summary { cursor:pointer; font-weight:600; font-size:13px; color:var(--muted); padding:2px 0; }
   button.sm { padding:4px 11px; font-size:12px; }
-  .cal.rng { top:calc(100% + 6px); left:0; width:252px; }
+  .cal.crange { top:calc(100% + 6px); left:0; width:252px; }
   .cal .p { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
   .cal .p button { background:var(--soft); border:1px solid var(--line); color:var(--text); border-radius:99px; padding:2px 9px; font-size:11px; font-weight:600; }
   .cal .g button.inr { background:var(--soft); border-radius:0; color:var(--accent); }
@@ -214,7 +214,7 @@
     <select id="fo" aria-label="Ordina">
       <option value="new">Più recenti prima</option><option value="old">Meno recenti prima</option>
     </select>
-    <div class="cwrap"><button type="button" class="sec" id="fdbtn" aria-label="Filtra per data" title="Filtra per data"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg><span id="fdlbl">Tutte le date</span></button><div id="rcal" class="cal rng hide"></div></div>
+    <div class="cwrap"><button type="button" class="sec" id="fdbtn" aria-label="Filtra per data" title="Filtra per data"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg><span id="fdlbl">Tutte le date</span></button><div id="rcal" class="cal crange hide"></div></div>
     <button class="sec hide" id="fclear">Azzera filtri</button>
   </div>
   <div id="list"></div>
